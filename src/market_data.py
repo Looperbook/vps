@@ -199,14 +199,18 @@ class MarketData:
                 # swallow ticker errors to keep WS alive
                 pass
 
-        # include perpDex to ensure correct feed on Builder DEX
-        sub_fills = self.info.subscribe({"type": "userFills", "user": self.account, "perpDex": self.dex}, _on_user_fills)
+        # Subscribe to WebSocket feeds per Hyperliquid docs:
+        # - userFills: user address only (no dex parameter in docs)
+        # - l2Book: coin only (no dex parameter in docs)  
+        # - allMids: uses "dex" field (not "perpDex") for builder DEX
+        sub_fills = self.info.subscribe({"type": "userFills", "user": self.account}, _on_user_fills)
         sub_book = None
         try:
-            sub_book = self.info.subscribe({"type": "l2Book", "coin": self.coin, "perpDex": self.dex}, _on_ticker)
+            sub_book = self.info.subscribe({"type": "l2Book", "coin": self.coin}, _on_ticker)
         except Exception:
             sub_book = None
-        sub_mids = self.info.subscribe({"type": "allMids", "perpDex": self.dex}, _on_ticker)
+        # Per docs: allMids uses "dex" key for perp dex selection
+        sub_mids = self.info.subscribe({"type": "allMids", "dex": self.dex}, _on_ticker)
         self._subs = {"fills": sub_fills, "mids": sub_mids}
         if sub_book is not None:
             self._subs["book"] = sub_book
@@ -443,6 +447,9 @@ class MarketData:
 
             def _on_ticker(msg: Any) -> None:
                 try:
+                    # Mark WS as alive on ANY message
+                    self._last_ws_any_msg = time.time()
+                    
                     data = msg.get("data", {})
                     mids = data.get("allMids", {})
                     mid = mids.get(self.coin)
@@ -457,8 +464,9 @@ class MarketData:
                 except Exception:
                     pass
 
-            sub_fills = self.info.subscribe({"type": "userFills", "user": self.account, "perpDex": self.dex}, _on_user_fills)
-            sub_mids = self.info.subscribe({"type": "allMids", "perpDex": self.dex}, _on_ticker)
+            # Per Hyperliquid docs: userFills has no dex param, allMids uses "dex" key
+            sub_fills = self.info.subscribe({"type": "userFills", "user": self.account}, _on_user_fills)
+            sub_mids = self.info.subscribe({"type": "allMids", "dex": self.dex}, _on_ticker)
             self._subs = {"fills": sub_fills, "mids": sub_mids}
             
             # C-3 FIX: Trigger REST poll after WS reconnect to catch fills missed during gap
