@@ -64,7 +64,7 @@ class CachedMid:
 
 class MarketData:
     def __init__(self, info: Info, coin: str, account: str, cfg: Settings, async_info=None,
-                 on_reconnect: Optional[callable] = None) -> None:
+                 on_reconnect: Optional[callable] = None, on_order_update: Optional[callable] = None) -> None:
         self.info = info
         self.async_info = async_info
         self.coin = coin
@@ -72,6 +72,8 @@ class MarketData:
         self.dex = cfg.dex
         self._http_timeout = cfg.http_timeout
         self.fill_queue: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
+        # SDK Feature: orderUpdates queue for real-time order state changes
+        self.order_update_queue: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
         self.last_event: float = time.time()
         self.ws_started = False
         self.loop: Optional[asyncio.AbstractEventLoop] = None
@@ -106,6 +108,8 @@ class MarketData:
         # C-3 FIX: Callback to trigger REST poll on WS reconnect
         # This ensures we catch fills missed during WS disconnect gap
         self._on_reconnect = on_reconnect
+        # SDK Feature: Callback for order updates (filled, cancelled, etc.)
+        self._on_order_update = on_order_update
 
     def _log_mid(self, source: str, mid: float) -> None:
         """
@@ -168,6 +172,36 @@ class MarketData:
                 # Do not raise from callback
                 pass
 
+        def _on_order_update(msg: Any) -> None:
+            """
+            SDK Feature: Handle orderUpdates subscription for real-time order state changes.
+            This provides faster notification of fills, cancellations, and order status changes.
+            """
+            try:
+                self._last_ws_any_msg = time.time()
+                data = msg.get("data", {})
+                if not data:
+                    return
+                # orderUpdates can contain multiple order statuses
+                updates = data if isinstance(data, list) else [data]
+                for update in updates:
+                    # Filter to our coin
+                    coin = update.get("coin") or update.get("order", {}).get("coin")
+                    if coin and coin != self.coin:
+                        continue
+                    _mark_healthy()
+                    if self.loop:
+                        asyncio.run_coroutine_threadsafe(self.order_update_queue.put(update), self.loop)
+                    # Also invoke callback if registered
+                    if self._on_order_update:
+                        try:
+                            if self.loop:
+                                asyncio.run_coroutine_threadsafe(self._on_order_update(update), self.loop)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
         def _on_ticker(msg: Any) -> None:
             try:
                 # Mark WS as alive on ANY message (even if not for our coin)
@@ -203,6 +237,7 @@ class MarketData:
         # - userFills: user address only (no dex parameter in docs)
         # - l2Book: coin only (no dex parameter in docs)  
         # - allMids: uses "dex" field (not "perpDex") for builder DEX
+        # - orderUpdates: user address only (SDK feature for real-time order state)
         sub_fills = self.info.subscribe({"type": "userFills", "user": self.account}, _on_user_fills)
         sub_book = None
         try:
@@ -211,10 +246,18 @@ class MarketData:
             sub_book = None
         # Per docs: allMids uses "dex" key for perp dex selection
         sub_mids = self.info.subscribe({"type": "allMids", "dex": self.dex}, _on_ticker)
+        # SDK Feature: Subscribe to orderUpdates for real-time order state changes
+        sub_orders = None
+        try:
+            sub_orders = self.info.subscribe({"type": "orderUpdates", "user": self.account}, _on_order_update)
+        except Exception as e:
+            logging.getLogger("gridbot").warning(json.dumps({"event": "ws_orderUpdates_sub_failed", "err": str(e)}))
         self._subs = {"fills": sub_fills, "mids": sub_mids}
         if sub_book is not None:
             self._subs["book"] = sub_book
-        logging.getLogger("gridbot").info(json.dumps({"event": "ws_start", "coin": self.coin, "account": self.account, "dex": self.dex}))
+        if sub_orders is not None:
+            self._subs["orders"] = sub_orders
+        logging.getLogger("gridbot").info(json.dumps({"event": "ws_start", "coin": self.coin, "account": self.account, "dex": self.dex, "has_order_updates": sub_orders is not None}))
         self.ws_started = True
         # PRODUCTION EXCELLENCE NOTE:
         # Added WS watchdog with backoff to avoid silent data loss on dropped sockets.

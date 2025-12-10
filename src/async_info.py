@@ -58,6 +58,30 @@ class AsyncInfo:
         payload: dict[str, Any] = {"type": "userFillsByTime", "user": account, "startTime": start_ms}
         return await self._post_info(payload)
 
+    async def query_order_by_oid(self, account: str, oid: int) -> Any:
+        """
+        Query order status by order ID.
+        SDK Reference: info.query_order_by_oid(user, oid)
+        """
+        payload: dict[str, Any] = {"type": "orderStatus", "user": account, "oid": oid}
+        return await self._post_info(payload)
+
+    async def query_order_by_cloid(self, account: str, cloid: str) -> Any:
+        """
+        Query order status by client order ID.
+        SDK Reference: info.query_order_by_cloid(user, cloid)
+        """
+        payload: dict[str, Any] = {"type": "orderStatus", "user": account, "oid": cloid}
+        return await self._post_info(payload)
+
+    async def user_rate_limit(self, account: str) -> Any:
+        """
+        Query current rate limit status for user.
+        SDK Reference: info.user_rate_limit(user)
+        """
+        payload: dict[str, Any] = {"type": "userRateLimit", "user": account}
+        return await self._post_info(payload)
+
     async def _post_info(self, payload: dict[str, Any]) -> Any:
         resp = await self.client.post("/info", json=payload)
         resp.raise_for_status()
