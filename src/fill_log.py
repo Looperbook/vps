@@ -274,6 +274,19 @@ class BatchedFillLog(FillLog):
             self._buffer = []
         
         # Write all lines in single operation under the file lock
+        await self._write_lines_to_disk(lines)
+    
+    async def flush_sync(self) -> None:
+        """
+        M-5 FIX: Public method for synchronous flush (WAL semantics).
+        
+        Call this after critical state updates to ensure durability.
+        Forces all buffered writes to disk immediately.
+        """
+        await self._flush()
+    
+    async def _write_lines_to_disk(self, lines: List[str]) -> None:
+        """Write lines to disk with rotation check."""
         async with self._lock:
             loop = asyncio.get_running_loop()
 

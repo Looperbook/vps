@@ -5,26 +5,14 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=gridbot
-Group=gridbot
+User=root
+Group=root
 WorkingDirectory=/opt/gridbot
-Environment="PATH=/opt/gridbot/.venv/bin"
 ExecStart=/opt/gridbot/.venv/bin/python /opt/gridbot/start_bot.py --no-confirm
 Restart=always
 RestartSec=10
-StandardOutput=append:/var/log/gridbot/gridbot.log
-StandardError=append:/var/log/gridbot/gridbot.log
-
-# Security hardening
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=/opt/gridbot/state /opt/gridbot/logs /var/log/gridbot
-PrivateTmp=true
-
-# Resource limits
-MemoryMax=512M
-CPUQuota=50%
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target

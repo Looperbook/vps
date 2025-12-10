@@ -157,6 +157,9 @@ class OrderManager:
         Handle partial fill - update filled_qty, only remove if fully filled.
         
         Returns the ActiveOrder if found (for position updates), None otherwise.
+        
+        C-2 FIX: Use absolute tolerance instead of percentage to avoid missing
+        final micro-fills. A 0.99 threshold can miss the last 1% of an order.
         """
         if cloid is None and oid is None:
             return None
@@ -172,15 +175,20 @@ class OrderManager:
         
         rec.filled_qty += fill_sz
         
-        # Only unindex if fully filled (with 1% tolerance for rounding)
-        if rec.original_qty > 0 and rec.filled_qty >= rec.original_qty * 0.99:
+        # C-2 FIX: Use absolute tolerance based on fill size instead of percentage
+        # Previous: rec.filled_qty >= rec.original_qty * 0.99 (could miss 1% of order)
+        # New: remaining quantity is less than 1% of this fill size (dust tolerance)
+        remaining = rec.original_qty - rec.filled_qty
+        dust_tolerance = max(fill_sz * 0.01, 1e-9)  # 1% of fill or epsilon
+        
+        if rec.original_qty > 0 and remaining <= dust_tolerance:
             self._unindex(rec)
             return rec
         
         # Partial fill: keep order in registry
         log.info(f'{{"event":"partial_fill","cloid":"{cloid}","oid":{oid},'
                  f'"fill_sz":{fill_sz},"filled_qty":{rec.filled_qty},'
-                 f'"original_qty":{rec.original_qty}}}')
+                 f'"original_qty":{rec.original_qty},"remaining":{remaining}}}')
         return rec
     
     def unindex(self, rec: ActiveOrder) -> None:

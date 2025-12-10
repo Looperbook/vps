@@ -63,7 +63,8 @@ class CachedMid:
 
 
 class MarketData:
-    def __init__(self, info: Info, coin: str, account: str, cfg: Settings, async_info=None) -> None:
+    def __init__(self, info: Info, coin: str, account: str, cfg: Settings, async_info=None,
+                 on_reconnect: Optional[callable] = None) -> None:
         self.info = info
         self.async_info = async_info
         self.coin = coin
@@ -100,6 +101,9 @@ class MarketData:
         self._last_mid_log_val = 0.0
         # Filter WS fills older than this timestamp (set by bot after loading state)
         self.min_fill_time_ms: int = 0
+        # C-3 FIX: Callback to trigger REST poll on WS reconnect
+        # This ensures we catch fills missed during WS disconnect gap
+        self._on_reconnect = on_reconnect
 
     def _log_mid(self, source: str, mid: float) -> None:
         """
@@ -441,6 +445,18 @@ class MarketData:
             sub_fills = self.info.subscribe({"type": "userFills", "user": self.account, "perpDex": self.dex}, _on_user_fills)
             sub_mids = self.info.subscribe({"type": "allMids", "perpDex": self.dex}, _on_ticker)
             self._subs = {"fills": sub_fills, "mids": sub_mids}
+            
+            # C-3 FIX: Trigger REST poll after WS reconnect to catch fills missed during gap
+            if self._on_reconnect and self.loop:
+                try:
+                    asyncio.run_coroutine_threadsafe(self._on_reconnect(), self.loop)
+                    logging.getLogger("gridbot").info(
+                        json.dumps({"event": "ws_reconnect_rest_poll_triggered", "coin": self.coin})
+                    )
+                except Exception as e:
+                    logging.getLogger("gridbot").warning(
+                        json.dumps({"event": "ws_reconnect_callback_error", "coin": self.coin, "err": str(e)})
+                    )
         except Exception:
             pass
 

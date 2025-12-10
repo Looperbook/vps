@@ -85,6 +85,38 @@ class OrderRouter:
         self.coalesce_pct = getattr(self.cfg, "coalesce_pct", 0.9)
         self.coalesce_min_ms = max(1, int(self.cfg.coalesce_ms / 4))
         self.coalesce_max_ms = max(self.cfg.coalesce_ms, 200)
+        # M-3 FIX: Track high volatility mode for faster order placement
+        self._high_vol_mode = False
+        self._vol_mode_until = 0.0  # timestamp when to exit high-vol mode
+
+    def adjust_for_volatility(self, volatility: float) -> None:
+        """
+        M-3 FIX: Adjust coalescing based on market volatility.
+        
+        During high volatility, reduce coalescing delay to avoid stale orders.
+        This prevents orders from being placed at outdated prices during fast moves.
+        
+        Args:
+            volatility: Current EWMA volatility (e.g., 0.02 = 2%)
+        """
+        now = time.time()
+        
+        if volatility > 0.02:  # >2% volatility - minimize delay
+            self._high_vol_mode = True
+            self._vol_mode_until = now + 30.0  # Stay in high-vol mode for 30s
+            self.coalesce_ms = self.coalesce_min_ms
+            logging.getLogger("gridbot").debug(
+                json.dumps({"event": "router_high_vol_mode", "coin": self.coin, 
+                           "volatility": volatility, "coalesce_ms": self.coalesce_ms})
+            )
+        elif volatility > 0.01:  # 1-2% - moderate delay
+            if not self._high_vol_mode or now > self._vol_mode_until:
+                self._high_vol_mode = False
+                self.coalesce_ms = max(self.coalesce_min_ms, self.coalesce_ms // 2)
+        else:
+            # Normal volatility - check if we should exit high-vol mode
+            if self._high_vol_mode and now > self._vol_mode_until:
+                self._high_vol_mode = False
 
     def start(self) -> None:
         if self._worker is None:
@@ -214,8 +246,8 @@ class OrderRouter:
                 # append to rolling window
                 try:
                     self._latencies.append(lat_ms)
-                    # compute percentile-based metric
-                    if len(self._latencies) >= 3:
+                    # compute percentile-based metric (only if not in high-vol mode)
+                    if len(self._latencies) >= 3 and not getattr(self, '_high_vol_mode', False):
                         arr = sorted(self._latencies)
                         idx = int(min(len(arr) - 1, max(0, round(self.coalesce_pct * (len(arr) - 1)))))
                         pct_val = arr[idx]

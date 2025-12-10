@@ -24,6 +24,9 @@ class FillDeduplicator:
     when the maximum size is reached. This prevents double-counting
     fills across WebSocket and REST poll sources.
     
+    M-1 FIX: Also tracks fill sequence to detect gaps when multiple
+    orders fill simultaneously during fast wicks.
+    
     Thread-safe for single-threaded asyncio usage (no internal locks).
     For multi-threaded access, wrap calls with external synchronization.
     """
@@ -45,7 +48,10 @@ class FillDeduplicator:
             "processed": 0,
             "duplicates": 0,
             "evictions": 0,
+            "sequence_gaps": 0,
         }
+        # M-1 FIX: Track last fill timestamp per coin for sequence gap detection
+        self._last_fill_ts: Dict[str, int] = {}  # coin -> last fill timestamp ms
     
     def _default_log(self, event: str, **kwargs) -> None:
         """Default logging implementation."""
@@ -119,6 +125,48 @@ class FillDeduplicator:
         self._processed[fill_key] = True
         self._order.append(fill_key)
         self._stats["processed"] += 1
+    
+    def check_and_add_sequenced(self, fill: Dict[str, Any], coin: str) -> tuple:
+        """
+        M-1 FIX: Check fill with sequence tracking for gap detection.
+        
+        Use this when you need to detect if fills arrived out-of-order,
+        which can happen during fast wicks when multiple orders fill.
+        
+        Args:
+            fill: Fill dictionary with oid, cloid, time, px, sz
+            coin: Coin symbol for per-coin sequence tracking
+            
+        Returns:
+            Tuple of (is_new: bool, is_gap: bool)
+            - is_new: True if fill is new and was added
+            - is_gap: True if fill arrived out of sequence (>1s gap)
+        """
+        fill_key = self.make_fill_key(fill)
+        ts = int(fill.get("time", 0))
+        
+        if fill_key in self._processed:
+            self._stats["duplicates"] += 1
+            return False, False
+        
+        # Check for sequence gap (fill arriving out of order by >1 second)
+        last_ts = self._last_fill_ts.get(coin, 0)
+        is_gap = ts > 0 and last_ts > 0 and ts < last_ts - 1000
+        
+        if is_gap:
+            self._stats["sequence_gaps"] += 1
+            self._log_event("fill_sequence_gap", coin=coin, fill_ts=ts, 
+                           last_ts=last_ts, gap_ms=last_ts - ts)
+        
+        self._add_key(fill_key)
+        # Update sequence tracker (always use max to handle out-of-order)
+        self._last_fill_ts[coin] = max(self._last_fill_ts.get(coin, 0), ts)
+        
+        return True, is_gap
+    
+    def get_last_fill_ts(self, coin: str) -> int:
+        """Get last fill timestamp for a coin."""
+        return self._last_fill_ts.get(coin, 0)
     
     def contains(self, fill_key: str) -> bool:
         """Check if fill key exists in processed set."""

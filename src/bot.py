@@ -38,6 +38,10 @@ from src.strategy import GridLevel, GridStrategy
 from src.strategy_factory import StrategyFactory
 from src.utils import now_ms, quantize, tick_to_decimals
 from src.status import StatusBoard
+# S-1, S-2, S-3 Structural Improvements
+from src.shadow_ledger import ShadowLedger
+from src.event_bus import EventBus, EventType, Event
+from src.order_sync import OrderSync
 
 log = build_logger("gridbot")
 
@@ -62,7 +66,13 @@ class GridBot:
         self.exchange = exchange
         self.metrics = metrics
         self.account = cfg.resolve_account()
-        self.market = MarketData(info, coin, self.account, cfg, async_info=self.async_info)
+        # C-3 FIX: Pass reconnect callback to trigger REST poll when WS reconnects
+        # This ensures fills during WS disconnect gap are captured
+        self.market = MarketData(
+            info, coin, self.account, cfg, 
+            async_info=self.async_info,
+            on_reconnect=self._on_ws_reconnect
+        )
         # Use atomic async state store to avoid concurrent save/load races and blocking IO
         self.state_store = AtomicStateStore(coin, cfg.state_dir)
         # Phase 3 observability - create metrics early so fill log can use callback
@@ -151,6 +161,23 @@ class GridBot:
             log_event=self._log_event,
             on_state_change=self._on_order_state_change
         )
+        # S-1: Shadow Ledger for position tracking with exchange reconciliation
+        self.shadow_ledger = ShadowLedger(
+            coin=coin,
+            log_event=self._log_event,
+            on_drift=self._on_position_drift
+        )
+        # S-2: Event Bus for decoupled component communication
+        self.event_bus = EventBus(
+            history_size=1000,
+            log_event=self._log_event
+        )
+        # S-3: Order Sync to keep OrderManager and OrderStateMachine in sync
+        self.order_sync = OrderSync(
+            order_manager=self.order_manager,
+            order_state_machine=self.order_state_machine,
+            log_event=self._log_event
+        )
         # Structured logging context with trace ids
         self.ctx = BotContext(coin=self.coin, logger=log)
         # Hardening: Track last stuck order check time
@@ -161,6 +188,13 @@ class GridBot:
         self._session_realized_pnl: float = 0.0
         self._session_start_time: float = time.time()
         self._alltime_realized_pnl: float = 0.0  # Loaded from state, never reset
+        # C-1 FIX: Serialize fills during grid rebuild to prevent race condition
+        # where fills use stale position snapshot
+        self._rebuild_lock = asyncio.Lock()
+        self._rebuild_in_progress = False
+        # M-2 FIX: Dedicated high watermark for REST polling
+        # Prevents skipping fills when last_fill_time_ms jumps during grid rebuild
+        self._rest_poll_hwm_ms: int = 0
 
     # Struct-4: Backward-compatible properties delegating to PositionTracker
     @property
@@ -196,8 +230,26 @@ class GridBot:
         except Exception:
             pass  # Must not raise
 
+    async def _on_ws_reconnect(self) -> None:
+        """
+        C-3 FIX: Callback triggered when WS reconnects after disconnect.
+        
+        Immediately poll REST fills to catch any fills missed during the 
+        WebSocket disconnect gap. This prevents fill loss scenarios where
+        WS was down but orders were still being matched on the exchange.
+        """
+        try:
+            self._log_event("ws_reconnect_rest_poll", reason="fill_gap_recovery")
+            await self._poll_rest_fills(force=True)
+            try:
+                self.rich_metrics.ws_reconnect_rest_polls.labels(coin=self.coin).inc()
+            except Exception:
+                pass
+        except Exception as exc:
+            self._log_event("ws_reconnect_rest_poll_error", err=str(exc))
+
     def _on_order_state_change(self, record, from_state: OrderState, to_state: OrderState) -> None:
-        """Callback when order state changes - update metrics."""
+        """Callback when order state changes - update metrics and publish event."""
         try:
             if to_state == OrderState.FILLED:
                 self.rich_metrics.orders_filled.labels(coin=self.coin, side=record.side).inc()
@@ -207,6 +259,62 @@ class GridBot:
                 self.rich_metrics.orders_rejected.labels(coin=self.coin, reason=record.error_code or "unknown").inc()
         except Exception:
             pass  # Metrics must not break execution
+        
+        # S-2: Publish order state change event
+        try:
+            event_type = {
+                OrderState.OPEN: EventType.ORDER_ACKNOWLEDGED,
+                OrderState.FILLED: EventType.ORDER_FILLED,
+                OrderState.PARTIALLY_FILLED: EventType.ORDER_PARTIAL,
+                OrderState.CANCELLED: EventType.ORDER_CANCELLED,
+                OrderState.REJECTED: EventType.ORDER_REJECTED,
+            }.get(to_state)
+            if event_type:
+                self.event_bus.publish_sync(Event(
+                    type=event_type,
+                    data={
+                        "cloid": record.cloid,
+                        "oid": record.oid,
+                        "side": record.side,
+                        "price": record.price,
+                        "from_state": from_state.name,
+                        "to_state": to_state.name,
+                    },
+                    source="order_state_machine",
+                ))
+        except Exception:
+            pass  # Events must not break execution
+
+    def _on_position_drift(self, result) -> None:
+        """
+        S-1: Callback when shadow ledger detects significant position drift.
+        
+        Logs the drift and publishes event for monitoring/alerting.
+        """
+        try:
+            self._log_event(
+                "position_drift_alert",
+                local=result.local_position,
+                exchange=result.exchange_position,
+                drift=result.drift,
+                drift_pct=result.drift_pct,
+                pending_exposure=result.pending_exposure,
+            )
+            self.rich_metrics.position_drift_alerts.labels(coin=self.coin).inc()
+            
+            # Publish drift event
+            self.event_bus.publish_sync(Event(
+                type=EventType.POSITION_DRIFT,
+                data={
+                    "drift": result.drift,
+                    "drift_pct": result.drift_pct,
+                    "local_position": result.local_position,
+                    "exchange_position": result.exchange_position,
+                },
+                source="shadow_ledger",
+            ))
+        except Exception:
+            pass  # Must not raise
 
     def _validate_fill_timestamp(self, ts_ms: int) -> Optional[str]:
         """
@@ -286,6 +394,9 @@ class GridBot:
         except Exception:
             pass
         await self._load_state()
+        # S-1: Initialize shadow ledger from loaded position
+        self.shadow_ledger.local_position = self.position
+        self.shadow_ledger.confirmed_position = self.position
         # Set min fill time on market to filter stale WS fills from previous sessions
         if self.market:
             self.market.min_fill_time_ms = self.last_fill_time_ms
@@ -326,6 +437,10 @@ class GridBot:
         # Optimization-2: Start batched fill log background flush
         if hasattr(self.fill_log, "start"):
             await self.fill_log.start()
+        # S-2: Start event bus in background
+        event_bus_task = asyncio.create_task(self.event_bus.start())
+        # Publish bot started event
+        await self.event_bus.emit(EventType.BOT_STARTED, source="bot", coin=self.coin)
         fill_task = asyncio.create_task(self._fill_worker())
         try:
             while self.running:
@@ -460,6 +575,10 @@ class GridBot:
         finally:
             fill_task.cancel()
             await asyncio.gather(fill_task, return_exceptions=True)
+        # S-2: Publish bot stopped event and stop event bus
+        await self.event_bus.emit(EventType.BOT_STOPPED, source="bot", coin=self.coin)
+        self.event_bus.stop()
+        await self.event_bus.drain(timeout=2.0)
         await self._cancel_all(reason="shutdown")
         await self._persist()
         if self.router:
@@ -515,6 +634,34 @@ class GridBot:
             self._log_event("fill_dedup_skip", key=self.fill_deduplicator.make_fill_key(f), replay=replay)
             return
 
+        # C-5 FIX: On replay, only clear order state - position was already persisted
+        # reflecting these fills. Updating position again would cause double-counting.
+        if replay:
+            # Just unindex the order if it exists (so we don't try to cancel filled orders)
+            rec = self.order_manager.pop_by_ids(str(cloid) if cloid else None, self._to_int_safe(oid))
+            if rec:
+                self._log_event("fill_replay_order_cleared", cloid=cloid, oid=oid, side=side, px=px, sz=sz)
+                # Update state machine to mark order as filled
+                self.order_state_machine.fill(
+                    cloid=str(cloid) if cloid else None,
+                    oid=self._to_int_safe(oid),
+                    fill_qty=sz,
+                    is_complete=True,
+                )
+            else:
+                self._log_event("fill_replay_no_order", cloid=cloid, oid=oid, side=side, px=px, sz=sz)
+            # Update last_fill_time_ms to track replay progress
+            self.last_fill_time_ms = max(self.last_fill_time_ms, ts_ms)
+            return
+
+        # C-1 FIX: If fill arrives during grid rebuild, mark rebuild_needed
+        # so the next iteration uses updated position. The fill still gets processed
+        # normally, but the grid will be rebuilt with fresh data after completion.
+        if self._rebuild_in_progress:
+            self.rebuild_needed = True
+            self._log_event("fill_during_rebuild", side=side, px=px, sz=sz, 
+                           note="marking_rebuild_needed")
+
         # Persist live fills to the event log to prevent double-counting on restart
         if not replay:
             try:
@@ -554,7 +701,10 @@ class GridBot:
             
             # Struct-6: Update order state machine with fill
             cloid_str = str(cloid) if cloid else None
-            is_fully_filled = rec.filled_qty >= rec.original_qty * 0.99 if rec.original_qty > 0 else True
+            # C-2 FIX: Use absolute tolerance instead of percentage for is_fully_filled
+            remaining = rec.original_qty - rec.filled_qty
+            dust_tolerance = max(sz * 0.01, 1e-9)  # 1% of fill or epsilon
+            is_fully_filled = rec.original_qty <= 0 or remaining <= dust_tolerance
             self.order_state_machine.fill(
                 cloid=cloid_str,
                 oid=self._to_int_safe(oid),
@@ -568,6 +718,27 @@ class GridBot:
             else:
                 self.position -= sz
             self.risk.set_position(self.position)
+            
+            # S-2: Publish position changed event
+            try:
+                await self.event_bus.emit(
+                    EventType.POSITION_CHANGED,
+                    source="fill_handler",
+                    position=self.position,
+                    delta=sz if side.startswith("b") else -sz,
+                    side=side,
+                )
+            except Exception:
+                pass  # Events must not break execution
+            
+            # S-1: Update shadow ledger with fill
+            await self.shadow_ledger.apply_fill(
+                side=side,
+                size=sz,
+                cloid=cloid_str,
+                oid=self._to_int_safe(oid),
+                timestamp_ms=ts_ms,
+            )
             lvl = rec.level
             if lvl.side == "buy":
                 pnl = (px - lvl.px) * sz
@@ -627,8 +798,31 @@ class GridBot:
             session_pnl=self._session_realized_pnl,
             alltime_pnl=self._alltime_realized_pnl,
         )
+        # S-2: Publish fill event
+        try:
+            await self.event_bus.emit(
+                EventType.FILL_RECEIVED if not matched else EventType.FILL_PROCESSED,
+                source="fill_handler",
+                side=side,
+                price=px,
+                size=sz,
+                oid=oid,
+                cloid=cloid,
+                matched=matched,
+                pnl=pnl,
+                position=self.position,
+            )
+        except Exception:
+            pass  # Events must not break execution
         if matched and self.strategy:
             self.strategy.on_price(px)
+            # M-5 FIX: Flush fill log before any other processing for crash safety
+            # This ensures the fill is durably recorded before we update other state
+            if hasattr(self.fill_log, 'flush_sync'):
+                try:
+                    await self.fill_log.flush_sync()
+                except Exception:
+                    pass  # Best effort - don't block fill processing
             # Immediately recycle only the filled level (no full-grid rebuild).
             await self._replace_after_fill(side, px, sz)
             await self._persist()
@@ -853,6 +1047,28 @@ class GridBot:
         
         self.position = pos
         self.risk.set_position(pos)
+        
+        # S-1: Reconcile shadow ledger with exchange position
+        try:
+            result = await self.shadow_ledger.reconcile_with_exchange(pos)
+            if result.drift_detected:
+                self._log_event(
+                    "shadow_ledger_drift",
+                    drift_amount=result.drift_amount,
+                    drift_percent=result.drift_percent,
+                    confirmed=result.confirmed_position,
+                    local=result.local_position,
+                    exchange=pos,
+                )
+                await self.event_bus.emit(
+                    EventType.POSITION_DRIFT,
+                    source="reconcile",
+                    drift_amount=result.drift_amount,
+                    drift_percent=result.drift_percent,
+                )
+        except Exception:
+            pass  # Shadow ledger reconciliation must not break main flow
+        
         self._log_event("reconcile_complete", position=self.position, equity=equity, daily_pnl=self.risk.state.daily_pnl, funding=self.risk.state.funding)
         # Update Phase 3 metrics (best-effort)
         try:
@@ -930,21 +1146,29 @@ class GridBot:
         now_t = time.time()
         if not force and now_t - self.last_rest_fill_poll < self.cfg.rest_fill_interval:
             return
-        # Critical-6: Use max of (last_fill_time - rescan, last_poll_time - buffer)
-        # to avoid fetching stale fills from previous sessions while still catching recent ones
+        # M-2 FIX: Use dedicated high watermark instead of last_fill_time_ms
+        # This prevents skipping fills when last_fill_time_ms jumps during rapid fills
         buffer_ms = int(self.cfg.rest_fill_interval * 1000 * 2)  # 2x poll interval as buffer
-        last_poll_ms = int(self.last_rest_fill_poll * 1000) if self.last_rest_fill_poll > 0 else 0
-        start_ms = max(
-            max(0, self.last_fill_time_ms - self.cfg.fill_rescan_ms),
-            max(0, last_poll_ms - buffer_ms) if last_poll_ms > 0 else 0
-        )
+        
+        # Use HWM if set, otherwise fall back to last_fill_time_ms for first poll
+        hwm_start = self._rest_poll_hwm_ms if self._rest_poll_hwm_ms > 0 else self.last_fill_time_ms
+        start_ms = max(0, hwm_start - self.cfg.fill_rescan_ms)
+        
         fills = await self.market.user_fills_since(self.account, start_ms)
+        max_fill_ts = start_ms  # Track highest fill timestamp seen
+        
         for f in sorted(fills, key=lambda x: int(x.get("time", 0))):
-            # Note: _handle_fill now has global dedup, so we can be more inclusive here
             if f.get("coin") != self.coin:
                 continue
+            fill_ts = int(f.get("time", 0))
+            max_fill_ts = max(max_fill_ts, fill_ts)
             await self._handle_fill(f)
-        self._log_event("rest_fills_polled", count=len(fills), start_ms=start_ms, last_fill_ms=self.last_fill_time_ms)
+        
+        # M-2 FIX: Update HWM to highest timestamp seen in this poll
+        self._rest_poll_hwm_ms = max(self._rest_poll_hwm_ms, max_fill_ts)
+        
+        self._log_event("rest_fills_polled", count=len(fills), start_ms=start_ms, 
+                       hwm_ms=self._rest_poll_hwm_ms, last_fill_ms=self.last_fill_time_ms)
         self.last_rest_fill_poll = now_t
 
     async def _build_and_place_grid(self, mid: float) -> None:
@@ -954,6 +1178,17 @@ class GridBot:
             self._log_event("grid_build_skip_mid", mid=mid)
             return
         
+        # C-1 FIX: Acquire rebuild lock to serialize with fill processing
+        # This prevents race condition where fills during rebuild use stale position
+        async with self._rebuild_lock:
+            self._rebuild_in_progress = True
+            try:
+                await self._build_and_place_grid_inner(mid)
+            finally:
+                self._rebuild_in_progress = False
+    
+    async def _build_and_place_grid_inner(self, mid: float) -> None:
+        """Inner grid building logic, called while holding rebuild lock."""
         # Snapshot position atomically to prevent race during rebuild (Bug #6)
         async with self.position_lock:
             position_snapshot = self.position
@@ -971,6 +1206,9 @@ class GridBot:
                 self.rich_metrics.atr_value.labels(coin=self.coin).set(self.strategy.last_atr)
             except Exception:
                 pass
+            # M-3 FIX: Adjust router coalescing based on volatility
+            if self.router and hasattr(self.router, 'adjust_for_volatility'):
+                self.router.adjust_for_volatility(self.strategy.last_vol)
         except Exception:
             pass
         
@@ -1140,6 +1378,30 @@ class GridBot:
                 self.order_state_machine.update_oid(cloid_str, oid_val)
                 self.order_state_machine.acknowledge(cloid=cloid_str)
             
+            # S-1: Track pending order in shadow ledger
+            try:
+                self.shadow_ledger.add_pending_order(
+                    cloid=cloid_str or str(oid_val),
+                    side=lvl.side,
+                    qty=lvl.sz,
+                )
+            except Exception:
+                pass  # Must not break order flow
+            
+            # S-2: Publish order submitted event
+            try:
+                await self.event_bus.emit(
+                    EventType.ORDER_SUBMITTED,
+                    source="submit_level",
+                    side=lvl.side,
+                    price=px,
+                    size=lvl.sz,
+                    oid=oid_val,
+                    cloid=cloid_str,
+                )
+            except Exception:
+                pass  # Events must not break execution
+            
             try:
                 self.rich_metrics.orders_submitted.labels(coin=self.coin, side=lvl.side).inc()
             except Exception:
@@ -1221,6 +1483,30 @@ class GridBot:
                     self.order_state_machine.update_oid(cloid_str, oid_val)
                     self.order_state_machine.acknowledge(cloid=cloid_str)
                 
+                # S-1: Track pending order in shadow ledger
+                try:
+                    self.shadow_ledger.add_pending_order(
+                        cloid=cloid_str or str(oid_val),
+                        side=lvl.side,
+                        qty=lvl.sz,
+                    )
+                except Exception:
+                    pass  # Must not break order flow
+                
+                # S-2: Publish order submitted event (batch)
+                try:
+                    await self.event_bus.emit(
+                        EventType.ORDER_SUBMITTED,
+                        source="batch_submit",
+                        side=lvl.side,
+                        price=px,
+                        size=lvl.sz,
+                        oid=oid_val,
+                        cloid=cloid_str,
+                    )
+                except Exception:
+                    pass  # Events must not break execution
+                
                 try:
                     self.rich_metrics.orders_submitted.labels(coin=self.coin, side=lvl.side).inc()
                 except Exception:
@@ -1237,7 +1523,12 @@ class GridBot:
             self._reset_api_errors()
 
     async def _cancel_record(self, rec: ActiveOrder, reason: str = "unspecified") -> bool:
-        """Critical-8: Return True if cancel confirmed, False otherwise. Only unindex on success."""
+        """Critical-8: Return True if order is confirmed gone, False if still active.
+        
+        C-6 FIX: On cancel failure, check if order actually still exists on exchange
+        before leaving it in the registry. This prevents stale orders from accumulating
+        when cancels fail but orders were already filled/cancelled elsewhere.
+        """
         if not self.router:
             return False
         success = False
@@ -1251,6 +1542,26 @@ class GridBot:
                 oid=rec.oid,
                 reason=reason,
             )
+            
+            # S-1: Remove pending order from shadow ledger
+            try:
+                order_id = rec.cloid or str(rec.oid) if rec.oid else None
+                if order_id:
+                    self.shadow_ledger.remove_pending_order(order_id)
+            except Exception:
+                pass  # Must not break cancel flow
+            
+            # S-2: Publish order cancelled event
+            try:
+                await self.event_bus.emit(
+                    EventType.ORDER_CANCELLED,
+                    source="cancel_record",
+                    cloid=rec.cloid,
+                    oid=rec.oid,
+                    reason=reason,
+                )
+            except Exception:
+                pass  # Events must not break execution
             
             try:
                 self.rich_metrics.orders_cancelled.labels(coin=self.coin, reason=reason).inc()
@@ -1282,8 +1593,30 @@ class GridBot:
                 cloid_type=str(type(rec.cloid)),
                 oid_type=str(type(rec.oid)),
             )
-            # Critical-8: Don't unindex on failure - order may still be resting
-            # Mark for reconciliation instead
+            
+            # C-6 FIX: Check if order is actually still open on exchange
+            # If order was filled or cancelled elsewhere, unindex it to prevent stale entries
+            try:
+                still_open = await self._is_order_still_open(rec.cloid, rec.oid)
+                if not still_open:
+                    self._log_event(
+                        "cancel_error_order_gone",
+                        cloid=rec.cloid,
+                        oid=rec.oid,
+                        reason="order_not_found_on_exchange",
+                    )
+                    self._unindex(rec)
+                    # Update state machine - order was filled or cancelled externally
+                    self.order_state_machine.cancel(
+                        cloid=rec.cloid,
+                        oid=rec.oid,
+                        reason="external_cancel_or_fill",
+                    )
+                    return True  # Order is gone, mission accomplished
+            except Exception as check_exc:
+                self._log_event("cancel_error_check_failed", err=str(check_exc))
+            
+            # Order may still be resting - mark for reconciliation
             self.rebuild_needed = True
             return False
         
@@ -1291,6 +1624,49 @@ class GridBot:
         if success:
             self._unindex(rec)
         return success
+    
+    async def _is_order_still_open(self, cloid: Optional[str], oid: Optional[int]) -> bool:
+        """C-6 FIX: Check if order still exists on exchange.
+        
+        Returns True if order is still open, False if it's gone (filled/cancelled).
+        On error, returns True (safer to assume order exists).
+        """
+        try:
+            # Use async_info if available for better performance
+            if self.async_info:
+                remote = await self.async_info.frontend_open_orders(self.account, self.cfg.dex)
+            else:
+                def _call():
+                    return self.info.frontend_open_orders(self.account, dex=self.cfg.dex)
+                remote = await asyncio.wait_for(
+                    asyncio.get_running_loop().run_in_executor(None, _call),
+                    timeout=self._http_timeout
+                )
+            
+            # Handle both list and dict response formats
+            if isinstance(remote, dict):
+                remote = remote.get("openOrders", [])
+            
+            for o in remote:
+                if o.get("coin") != self.coin:
+                    continue
+                remote_cloid = o.get("cloid")
+                remote_oid = o.get("oid")
+                # Match by cloid if available
+                if cloid and remote_cloid and str(remote_cloid) == str(cloid):
+                    return True
+                # Match by oid if available
+                if oid is not None and remote_oid is not None:
+                    try:
+                        if int(remote_oid) == int(oid):
+                            return True
+                    except (ValueError, TypeError):
+                        pass
+            
+            return False  # Order not found in open orders
+        except Exception as exc:
+            self._log_event("is_order_still_open_error", err=str(exc), cloid=cloid, oid=oid)
+            return True  # Assume open on error (safer)
 
     async def _cancel_all(self, reason: str = "") -> None:
         if not self.router:

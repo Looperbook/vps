@@ -151,6 +151,13 @@ class RichMetrics:
             labelnames=['coin'],
             registry=reg
         )
+        # C-3 FIX: Track WS reconnect REST polls for observability
+        self.ws_reconnect_rest_polls = Counter(
+            'ws_reconnect_rest_polls_total',
+            'REST fill polls triggered by WS reconnect (fill gap recovery)',
+            labelnames=['coin'],
+            registry=reg
+        )
         self.state_reconciliation_ms = Histogram(
             'state_reconciliation_ms',
             'REST audit duration (milliseconds)',
@@ -206,6 +213,13 @@ class RichMetrics:
         self.position_drift_amount = Gauge(
             'position_drift_amount',
             'Last detected position drift amount (coins)',
+            labelnames=['coin'],
+            registry=reg
+        )
+        # S-1: Shadow ledger drift alerts (significant drift > 10%)
+        self.position_drift_alerts = Counter(
+            'position_drift_alerts_total',
+            'Significant position drift alerts from shadow ledger',
             labelnames=['coin'],
             registry=reg
         )

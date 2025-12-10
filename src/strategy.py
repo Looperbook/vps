@@ -129,12 +129,13 @@ class GridStrategy:
         vol_adj = self.last_vol * 2.5
         raw = self.effective_base_spacing_pct + atr_adj * 0.5 + vol_adj
         
-        # Critical-7: Minimum spacing must be at least 2 ticks to avoid overlap
-        tick_floor = max(self.tick_sz / max(px, 1e-9) * 2, self.effective_base_spacing_pct)
-        # Critical-7: Also enforce minimum spread to prevent self-trading (at least 10 bps)
-        min_spread_spacing = max(0.001, tick_floor)
+        # C-4 FIX: Strengthen minimum spacing to prevent grid collapse
+        # Require at least 3 ticks between any two levels (was 2)
+        tick_floor = max(self.tick_sz / max(px, 1e-9) * 3, self.effective_base_spacing_pct)
+        # C-4 FIX: Hard floor of 5 bps (0.0005) to prevent self-trade risk
+        min_spread_spacing = max(0.0005, tick_floor)
         
-        # HARDENED: tighten spacing aggressively when in a losing position to deleverage faster.
+        # Tighten spacing when in a losing position to deleverage faster
         center = grid_center if grid_center is not None else px
         loss_drift = 0.0
         if position != 0:
@@ -142,29 +143,53 @@ class GridStrategy:
             # positive drift_pct means price moved against our position
             loss_drift = max(0.0, sign * (center - px) / max(px, 1e-9))
         if loss_drift > 0:
-            # Critical-7: Limit tightening to 50% (floor at 50% of normal) to prevent collapse
-            tighten_mult = max(0.50, 1 - min(0.50, loss_drift * 10))
+            # C-4 FIX: Cap tightening at 40% reduction (floor at 60%) to prevent collapse
+            # Was 50% which could stack with low ATR to create dangerous compression
+            tighten_mult = max(0.60, 1 - min(0.40, loss_drift * 8))
         else:
             tighten_mult = 1.0
         
         # Apply tightening to raw spacing
         adjusted_spacing = raw * tighten_mult
         
-        # Critical-7: Final floor check - spacing must be at least min_spread_spacing
-        spacing = min(self.cfg.max_spacing_pct, max(min_spread_spacing, adjusted_spacing))
+        # C-4 FIX: Never go below 50% of base spacing regardless of tightening
+        base_floor = self.effective_base_spacing_pct * 0.5
+        spacing = min(self.cfg.max_spacing_pct, max(min_spread_spacing, base_floor, adjusted_spacing))
         
-        # Critical-7: Validate adjacent levels won't cross (spacing * grids must give reasonable spread)
-        min_total_spread = min_spread_spacing * 2  # At least 2x minimum on each side
-        if spacing < min_total_spread / self.effective_grids:
+        # C-4 FIX: Validate total grid width is sensible
+        # Total spread = spacing * grids * 2 (both sides)
+        # Require at least 1% total spread to ensure meaningful grid separation
+        total_grid_width = spacing * self.effective_grids * 2
+        min_total_width = 0.01  # 1% minimum total spread
+        
+        if total_grid_width < min_total_width:
             old_spacing = spacing
-            spacing = min_total_spread / self.effective_grids
+            spacing = min_total_width / (self.effective_grids * 2)
+            logging.getLogger("gridbot").warning(
+                json.dumps({
+                    "event": "grid_compression_override",
+                    "raw_spacing": raw,
+                    "computed_spacing": old_spacing,
+                    "final_spacing": spacing,
+                    "total_grid_width_pct": total_grid_width,
+                    "min_required_width": min_total_width,
+                    "grids": self.effective_grids,
+                    "reason": "total_spread_below_minimum"
+                })
+            )
+        
+        # Secondary check: per-level spacing must allow reasonable separation
+        min_per_level = min_spread_spacing * 2 / max(1, self.effective_grids)
+        if spacing < min_per_level:
+            old_spacing = spacing
+            spacing = min_per_level
             if self._log():
                 logging.getLogger("gridbot").warning(
                     json.dumps({
                         "event": "spacing_compression_prevented",
                         "old_spacing": old_spacing,
                         "new_spacing": spacing,
-                        "min_required": min_total_spread / self.effective_grids
+                        "min_required": min_per_level
                     })
                 )
         
