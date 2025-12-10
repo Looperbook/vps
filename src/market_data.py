@@ -97,6 +97,8 @@ class MarketData:
         self._stopping = False
         self._last_resubscribe = 0.0
         self._max_queue = 2000  # guardrail to avoid unbounded fill growth
+        # Track last WS message received (any message) to distinguish "WS dead" from "no data for our coin"
+        self._last_ws_any_msg: float = time.time()
         self._last_mid_log_ts = 0.0
         self._last_mid_log_val = 0.0
         # Filter WS fills older than this timestamp (set by bot after loading state)
@@ -168,6 +170,10 @@ class MarketData:
 
         def _on_ticker(msg: Any) -> None:
             try:
+                # Mark WS as alive on ANY message (even if not for our coin)
+                # This prevents false stale detection for low-volume builder DEX markets
+                self._last_ws_any_msg = time.time()
+                
                 data = msg.get("data", {})
                 levels = data.get("levels")
                 if levels and data.get("coin") == self.coin:
@@ -363,9 +369,18 @@ class MarketData:
                 # avoid hammering resubscribe if we recently refreshed via REST
                 if (now - self._last_rest_mid_ts) < self._stale_after:
                     continue
+                # FIX: For builder DEX markets, WS may be alive but not sending our coin
+                # Only warn if WS itself is truly stale (no messages at all)
+                ws_alive_gap = now - self._last_ws_any_msg
+                if ws_alive_gap < self._stale_after:
+                    # WS is alive, just no data for our coin - this is normal for low-volume markets
+                    # Reset backoff since WS is healthy
+                    backoff = 5.0
+                    self._halted = False
+                    continue
                 if now - self._last_warn_ts >= max(self._watch_interval, backoff):
                     # HARDENED: throttle stale warnings; mark halt if fatal gap exceeded.
-                    log.warning(json.dumps({"event": "ws_stale_detected", "coin": self.coin, "gap_sec": gap, "backoff": backoff}))
+                    log.warning(json.dumps({"event": "ws_stale_detected", "coin": self.coin, "gap_sec": gap, "ws_gap_sec": ws_alive_gap, "backoff": backoff}))
                     self._last_warn_ts = now
                 if gap >= self._fatal_after and not self._halted:
                     self._halted = True
