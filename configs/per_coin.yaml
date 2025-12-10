@@ -1,0 +1,24 @@
+# Per-coin configuration overrides
+# These override global .env settings for specific coins
+#
+# Supported fields (must match config.py field names):
+#   investment_usd    - Total investment per coin in USD
+#   grids             - Number of grid levels
+#   base_spacing_pct  - Base spacing between grid levels (0.01 = 1%)
+#   coalesce_ms       - Order coalescing window in milliseconds
+#   default_strategy  - Strategy type (default: grid)
+
+xyz:NVDA:
+  coalesce_ms: 30
+  default_strategy: grid
+  investment_usd: 750
+  base_spacing_pct: 0.005
+  grids: 24
+
+xyz:ORCL:
+  coalesce_ms: 30
+  default_strategy: grid
+  investment_usd: 750
+  base_spacing_pct: 0.0005
+  grids: 24
+

@@ -1,0 +1,9 @@
+hyperliquid-python-sdk
+python-dotenv
+pyyaml
+uvloop; platform_system != "Windows"
+requests
+httpx[http2]
+pytest
+prometheus-client
+eth-account

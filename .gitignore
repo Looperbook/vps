@@ -1,0 +1,30 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+
+# Runtime state and logs
+state/
+logs/
+*.log
+
+# Environment and secrets
+.env
+
+# OS
+.DS_Store
+
+# Build and coverage
+dist/
+build/
+coverage/
+htmlcov/
+
+# Old state files (if any remain)
+bot_state_*.json
+soak_*.json
+soak_*.csv
