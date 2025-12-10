@@ -50,7 +50,11 @@ class AsyncInfo:
             payload["dex"] = dex
         return await self._post_info(payload)
 
-    async def user_fills_by_time(self, account: str, start_ms: int, dex: Optional[str] = None) -> Any:
+    async def user_fills_by_time(self, account: str, start_ms: int) -> Any:
+        """
+        Fetch fills by time. Per Hyperliquid docs: userFillsByTime does NOT support dex filtering.
+        Returns all fills for the user - caller must filter by coin if needed.
+        """
         payload: dict[str, Any] = {"type": "userFillsByTime", "user": account, "startTime": start_ms}
         return await self._post_info(payload)
 

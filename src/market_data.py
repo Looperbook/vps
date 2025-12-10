@@ -306,14 +306,19 @@ class MarketData:
         return mid
 
     async def user_fills_since(self, account: str, start_ms: int) -> List[Dict[str, Any]]:
+        """
+        Fetch user fills since a given timestamp.
+        
+        Per Hyperliquid docs: userFillsByTime does NOT support dex filtering.
+        We fetch all fills and filter client-side by coin.
+        """
         if self.async_info:
-            res = await self.async_info.user_fills_by_time(account, start_ms, self.dex)
+            res = await self.async_info.user_fills_by_time(account, start_ms)
         else:
             def _call() -> List[Dict[str, Any]]:
-                try:
-                    res = self.info.user_fills_by_time(account, start_ms, perp_dex=self.dex)
-                except TypeError:
-                    res = self.info.user_fills_by_time(account, start_ms)
+                # Per SDK: user_fills_by_time(address, start_time, end_time=None, aggregate_by_time=False)
+                # No dex parameter - returns all fills for user
+                res = self.info.user_fills_by_time(account, start_ms)
                 if isinstance(res, dict) and "fills" in res:
                     return res["fills"]
                 if isinstance(res, list):
@@ -321,10 +326,13 @@ class MarketData:
                 return []
             res = await self._call_with_retry(_call, label="user_fills_by_time")
         if isinstance(res, dict) and "fills" in res:
-            return res["fills"]
-        if isinstance(res, list):
-            return res
-        return []
+            fills = res["fills"]
+        elif isinstance(res, list):
+            fills = res
+        else:
+            fills = []
+        # Filter to only our coin (userFillsByTime returns all fills across all coins/dexs)
+        return [f for f in fills if f.get("coin") == self.coin]
 
     async def _call_with_retry(self, fn, label: str, retries: int = 1):
         """
