@@ -12,7 +12,6 @@ echo "=========================================="
 BOT_USER="gridbot"
 BOT_DIR="/opt/gridbot"
 LOG_DIR="/var/log/gridbot"
-PYTHON_VERSION="3.11"
 
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then
@@ -22,7 +21,22 @@ fi
 
 echo "[1/8] Installing system dependencies..."
 apt-get update
-apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-venv python${PYTHON_VERSION}-dev git curl
+
+# Try to find available Python version (3.11, 3.10, or 3.9)
+if apt-cache show python3.11 &>/dev/null; then
+    PYTHON_VERSION="3.11"
+elif apt-cache show python3.10 &>/dev/null; then
+    PYTHON_VERSION="3.10"
+elif apt-cache show python3.9 &>/dev/null; then
+    PYTHON_VERSION="3.9"
+else
+    # Fallback to default python3
+    PYTHON_VERSION="3"
+fi
+
+echo "Using Python version: $PYTHON_VERSION"
+apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-venv python${PYTHON_VERSION}-dev git curl || \
+apt-get install -y python3 python3-venv python3-dev git curl
 
 echo "[2/8] Creating bot user..."
 if ! id "$BOT_USER" &>/dev/null; then
@@ -54,7 +68,13 @@ if [ -d "state" ] && [ "$(ls -A state)" ]; then
 fi
 
 echo "[5/8] Setting up Python virtual environment..."
-sudo -u $BOT_USER python${PYTHON_VERSION} -m venv $BOT_DIR/.venv
+# Use the detected Python version or fall back to python3
+PYTHON_CMD="python${PYTHON_VERSION}"
+if ! command -v $PYTHON_CMD &>/dev/null; then
+    PYTHON_CMD="python3"
+fi
+echo "Using: $PYTHON_CMD"
+sudo -u $BOT_USER $PYTHON_CMD -m venv $BOT_DIR/.venv
 sudo -u $BOT_USER $BOT_DIR/.venv/bin/pip install --upgrade pip
 sudo -u $BOT_USER $BOT_DIR/.venv/bin/pip install -r $BOT_DIR/requirements.txt
 
