@@ -881,6 +881,10 @@ class GridBot:
                 session_start=self._session_start_time,
                 via="state_manager",
             )
+        # Skew handling is done via state manager - return False (no rebalance needed)
+        return False
+    
+    async def _fetch_exchange_position(self) -> float | None:
         """Fetch current position from exchange."""
         try:
             builder_asset = self.cfg.dex.lower() == "xyz" or self.coin.startswith("xyz:")
