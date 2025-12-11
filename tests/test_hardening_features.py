@@ -13,9 +13,9 @@ import pytest
 import time
 from unittest.mock import Mock, AsyncMock, patch
 
-from src.order_state_machine import OrderStateMachine, OrderState
-from src.fill_log import FillLog, BatchedFillLog
-from src.metrics_rich import RichMetrics
+from src.execution.order_state_machine import OrderStateMachine, OrderState
+from src.execution.fill_log import FillLog, BatchedFillLog
+from src.monitoring.metrics_rich import RichMetrics
 
 
 class TestFillTimestampValidation:
@@ -23,7 +23,7 @@ class TestFillTimestampValidation:
     
     def test_future_timestamp_detected(self):
         """Fill with future timestamp should be flagged."""
-        from src.utils import now_ms
+        from src.core.utils import now_ms
         
         # Create a mock bot-like object with the validation method
         class MockBot:
@@ -51,7 +51,7 @@ class TestFillTimestampValidation:
     
     def test_very_old_timestamp_detected(self):
         """Fill with very old timestamp should be flagged."""
-        from src.utils import now_ms
+        from src.core.utils import now_ms
         
         class MockBot:
             def _validate_fill_timestamp(self, ts_ms: int):

@@ -3,7 +3,7 @@ import os
 import sys
 from types import ModuleType
 
-from src.fill_log import FillLog
+from src.execution.fill_log import FillLog
 
 
 def test_fill_log_rotation_on_upload_failure(tmp_path, monkeypatch):

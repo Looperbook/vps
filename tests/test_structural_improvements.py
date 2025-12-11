@@ -10,12 +10,12 @@ import asyncio
 import time
 import pytest
 
-from src.shadow_ledger import ShadowLedger, PendingOrder, ReconcileResult, LedgerSnapshot
-from src.event_bus import EventBus, Event, EventType, Subscription
-from src.order_sync import OrderSync, OrderSyncError
-from src.order_manager import OrderManager
-from src.order_state_machine import OrderStateMachine, OrderState
-from src.strategy import GridLevel
+from src.state.shadow_ledger import ShadowLedger, PendingOrder, ReconcileResult, LedgerSnapshot
+from src.core.event_bus import EventBus, Event, EventType, Subscription
+from src.execution.order_sync import OrderSync, OrderSyncError
+from src.execution.order_manager import OrderManager
+from src.execution.order_state_machine import OrderStateMachine, OrderState
+from src.strategy.strategy import GridLevel
 
 
 # =============================================================================

@@ -11,9 +11,9 @@ import time
 from typing import Any, Dict
 
 from src.bot import GridBot
-from src.strategy import GridStrategy
-from src.metrics_rich import RichMetrics
-from src.risk import RiskEngine
+from src.strategy.strategy import GridStrategy
+from src.monitoring.metrics_rich import RichMetrics
+from src.risk.risk import RiskEngine
 
 
 class DummyInfo:
@@ -150,6 +150,10 @@ async def run_integration():
     bot.router = DummyRouter()
     # replace rich_metrics with a fresh one for inspection
     bot.rich_metrics = RichMetrics()
+    
+    # Set up services to use the new architecture path (not fallbacks)
+    from src.bot_factory import setup_test_services
+    setup_test_services(bot)
 
     # ensure no exceptions when building grid
     await bot._build_and_place_grid(100.0)

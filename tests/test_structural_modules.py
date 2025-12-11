@@ -15,11 +15,11 @@ import time
 from decimal import Decimal
 from unittest.mock import MagicMock
 
-from src.order_manager import OrderManager, ActiveOrder
-from src.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
-from src.fill_deduplicator import FillDeduplicator
-from src.position_tracker import PositionTracker, PositionSnapshot, DriftResult
-from src.strategy import GridLevel
+from src.execution.order_manager import OrderManager, ActiveOrder
+from src.risk.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
+from src.execution.fill_deduplicator import FillDeduplicator
+from src.state.position_tracker import PositionTracker, PositionSnapshot, DriftResult
+from src.strategy.strategy import GridLevel
 
 
 class TestOrderManager:
@@ -530,7 +530,7 @@ class TestGridCalculator:
     @pytest.fixture
     def calculator(self, mock_cfg):
         """Create a GridCalculator instance."""
-        from src.grid_calculator import GridCalculator
+        from src.strategy.grid_calculator import GridCalculator
         return GridCalculator(
             cfg=mock_cfg,
             tick_sz=0.01,
@@ -578,7 +578,7 @@ class TestGridCalculator:
     
     def test_build_filtered_levels_basic(self, calculator, mock_cfg):
         """Test build_filtered_levels produces levels."""
-        from src.strategy import GridStrategy
+        from src.strategy.strategy import GridStrategy
         
         strategy = GridStrategy(mock_cfg, tick_sz=0.01, px_decimals=2, sz_decimals=3)
         
@@ -601,7 +601,7 @@ class TestGridCalculator:
     
     def test_build_filtered_levels_flatten_mode(self, calculator, mock_cfg):
         """Test flatten_mode filters to reduce-only orders."""
-        from src.strategy import GridStrategy
+        from src.strategy.strategy import GridStrategy
         
         strategy = GridStrategy(mock_cfg, tick_sz=0.01, px_decimals=2, sz_decimals=3)
         
@@ -624,7 +624,7 @@ class TestGridCalculator:
     
     def test_compute_grid_diff_new_levels(self, calculator):
         """Test grid diff with all new levels."""
-        from src.strategy import GridLevel
+        from src.strategy.strategy import GridLevel
         
         levels = [
             GridLevel("buy", 99.0, 1.0),
@@ -643,8 +643,8 @@ class TestGridCalculator:
     
     def test_compute_grid_diff_cancel_stale(self, calculator):
         """Test grid diff cancels stale orders."""
-        from src.strategy import GridLevel
-        from src.order_manager import ActiveOrder
+        from src.strategy.strategy import GridLevel
+        from src.execution.order_manager import ActiveOrder
         
         # Existing order at 98.0 not in desired
         existing_order = MagicMock()
@@ -667,7 +667,7 @@ class TestGridCalculator:
     
     def test_compute_grid_diff_preserve_queue(self, calculator):
         """Test grid diff preserves orders within tick threshold."""
-        from src.strategy import GridLevel
+        from src.strategy.strategy import GridLevel
         
         # Existing order
         existing_order = MagicMock()
@@ -692,7 +692,7 @@ class TestGridCalculator:
     
     def test_calculate_replacement_level_buy_fill(self, calculator, mock_cfg):
         """Test replacement level after buy fill."""
-        from src.strategy import GridStrategy
+        from src.strategy.strategy import GridStrategy
         
         strategy = GridStrategy(mock_cfg, tick_sz=0.01, px_decimals=2, sz_decimals=3)
         strategy.on_price(100.0)  # Initialize
@@ -712,7 +712,7 @@ class TestGridCalculator:
     
     def test_calculate_replacement_level_sell_fill(self, calculator, mock_cfg):
         """Test replacement level after sell fill."""
-        from src.strategy import GridStrategy
+        from src.strategy.strategy import GridStrategy
         
         strategy = GridStrategy(mock_cfg, tick_sz=0.01, px_decimals=2, sz_decimals=3)
         strategy.on_price(100.0)
@@ -732,7 +732,7 @@ class TestGridCalculator:
     
     def test_calculate_replacement_level_flatten_blocks(self, calculator, mock_cfg):
         """Test replacement returns None when flatten mode blocks."""
-        from src.strategy import GridStrategy
+        from src.strategy.strategy import GridStrategy
         
         strategy = GridStrategy(mock_cfg, tick_sz=0.01, px_decimals=2, sz_decimals=3)
         strategy.on_price(100.0)
@@ -752,7 +752,7 @@ class TestGridCalculator:
     
     def test_quantize_level(self, calculator):
         """Test level price quantization."""
-        from src.strategy import GridLevel
+        from src.strategy.strategy import GridLevel
         
         lvl = GridLevel("buy", 99.123, 1.0)
         result = calculator.quantize_level(lvl)
@@ -798,12 +798,12 @@ class TestOrderStateMachine:
     @pytest.fixture
     def state_machine(self):
         """Create an OrderStateMachine instance."""
-        from src.order_state_machine import OrderStateMachine
+        from src.execution.order_state_machine import OrderStateMachine
         return OrderStateMachine()
     
     def test_create_order_pending_state(self, state_machine):
         """Test that new orders start in PENDING state."""
-        from src.order_state_machine import OrderState
+        from src.execution.order_state_machine import OrderState
         
         record = state_machine.create_order(
             cloid="test-001",
@@ -847,7 +847,7 @@ class TestOrderStateMachine:
     
     def test_acknowledge_transition(self, state_machine):
         """Test PENDING -> OPEN transition."""
-        from src.order_state_machine import OrderState
+        from src.execution.order_state_machine import OrderState
         
         state_machine.create_order("cloid-1", 100, "buy", 100.0, 1.0)
         
@@ -859,7 +859,7 @@ class TestOrderStateMachine:
     
     def test_partial_fill_transition(self, state_machine):
         """Test OPEN -> PARTIALLY_FILLED transition."""
-        from src.order_state_machine import OrderState
+        from src.execution.order_state_machine import OrderState
         
         state_machine.create_order("cloid-1", 100, "buy", 100.0, 10.0)
         state_machine.acknowledge(cloid="cloid-1")
@@ -874,7 +874,7 @@ class TestOrderStateMachine:
     
     def test_full_fill_transition(self, state_machine):
         """Test OPEN -> FILLED transition."""
-        from src.order_state_machine import OrderState
+        from src.execution.order_state_machine import OrderState
         
         state_machine.create_order("cloid-1", 100, "buy", 100.0, 10.0)
         state_machine.acknowledge(cloid="cloid-1")
@@ -889,7 +889,7 @@ class TestOrderStateMachine:
     
     def test_cancel_transition(self, state_machine):
         """Test OPEN -> CANCELLED transition."""
-        from src.order_state_machine import OrderState
+        from src.execution.order_state_machine import OrderState
         
         state_machine.create_order("cloid-1", 100, "buy", 100.0, 1.0)
         state_machine.acknowledge(cloid="cloid-1")
@@ -902,7 +902,7 @@ class TestOrderStateMachine:
     
     def test_reject_transition(self, state_machine):
         """Test PENDING -> REJECTED transition."""
-        from src.order_state_machine import OrderState
+        from src.execution.order_state_machine import OrderState
         
         state_machine.create_order("cloid-1", None, "buy", 100.0, 1.0)
         
@@ -919,7 +919,7 @@ class TestOrderStateMachine:
     
     def test_invalid_transition_blocked(self, state_machine):
         """Test that invalid transitions are blocked."""
-        from src.order_state_machine import OrderState
+        from src.execution.order_state_machine import OrderState
         
         state_machine.create_order("cloid-1", 100, "buy", 100.0, 1.0)
         state_machine.acknowledge(cloid="cloid-1")
@@ -1001,7 +1001,7 @@ class TestOrderStateMachine:
     
     def test_state_change_callback(self):
         """Test on_state_change callback is fired."""
-        from src.order_state_machine import OrderStateMachine, OrderState
+        from src.execution.order_state_machine import OrderStateMachine, OrderState
         
         callback_calls = []
         
@@ -1019,7 +1019,7 @@ class TestOrderStateMachine:
     
     def test_immediate_fill_from_pending(self, state_machine):
         """Test PENDING -> FILLED for market orders."""
-        from src.order_state_machine import OrderState
+        from src.execution.order_state_machine import OrderState
         
         state_machine.create_order("cloid-1", 100, "buy", 100.0, 1.0)
         
@@ -1032,7 +1032,7 @@ class TestOrderStateMachine:
     
     def test_expire_transition(self, state_machine):
         """Test PENDING -> EXPIRED transition."""
-        from src.order_state_machine import OrderState
+        from src.execution.order_state_machine import OrderState
         
         state_machine.create_order("cloid-1", None, "buy", 100.0, 1.0)
         
@@ -1044,7 +1044,7 @@ class TestOrderStateMachine:
     
     def test_multiple_partial_fills(self, state_machine):
         """Test multiple partial fills accumulate correctly."""
-        from src.order_state_machine import OrderState
+        from src.execution.order_state_machine import OrderState
         
         state_machine.create_order("cloid-1", 100, "buy", 100.0, 10.0)
         state_machine.acknowledge(cloid="cloid-1")

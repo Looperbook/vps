@@ -1,7 +1,7 @@
 import asyncio
-from src.fill_log import FillLog
-from src.fill_log_manager import FillLogManager
-from src.utils import now_ms
+from src.execution.fill_log import FillLog
+from src.execution.fill_log_manager import FillLogManager
+from src.core.utils import now_ms
 
 
 def test_fill_log_manager_compacts_old_events(tmp_path):

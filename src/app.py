@@ -10,8 +10,8 @@ import logging
 from typing import List
 
 from src.bot import GridBot
-from src.per_coin_config import load_per_coin_overrides
-from src.nonce import NonceCoordinator
+from src.config.per_coin_config import load_per_coin_overrides
+from src.infra.nonce import NonceCoordinator
 
 
 class BotRunner:

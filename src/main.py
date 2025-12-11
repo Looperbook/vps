@@ -18,17 +18,17 @@ from typing import List
 from hyperliquid.exchange import Exchange
 from hyperliquid.info import Info
 
-from src.config import Settings
-from src.logging_cfg import build_logger
-from src.metrics import Metrics, HealthChecker, start_metrics_server
-from src.status import StatusBoard
-from src.async_info import AsyncInfo
+from src.config.config import Settings
+from src.infra.logging_cfg import build_logger
+from src.monitoring.metrics import Metrics, HealthChecker, start_metrics_server
+from src.monitoring.status import StatusBoard
+from src.infra.async_info import AsyncInfo
 import httpx
-from src.async_execution import AsyncExchange
+from src.infra.async_execution import AsyncExchange
 from src.app import run_all
-from src.fill_log_manager import start_compactor
-from src.config_validator import validate_and_log
-from src.alerting import configure_alerts, get_alert_manager, AlertSeverity
+from src.execution.fill_log_manager import start_compactor
+from src.config.config_validator import validate_and_log
+from src.monitoring.alerting import configure_alerts, get_alert_manager, AlertSeverity
 
 log = build_logger("gridbot")
 

@@ -7,14 +7,18 @@ import time
 import httpx
 from dotenv import load_dotenv
 
-# Load environment
-load_dotenv('/opt/gridbot/.env')
+# Load environment - try local first, then VPS path
+if os.path.exists('.env'):
+    load_dotenv('.env')
+else:
+    load_dotenv('/opt/gridbot/.env')
 
 account_address = os.environ['HL_USER_ADDRESS']
 private_key = os.environ['HL_AGENT_KEY']
 dex = os.environ.get('HL_DEX', 'xyz')
 
-info = Info(constants.MAINNET_API_URL, skip_ws=True)
+# Initialize Info with xyz DEX support
+info = Info(constants.MAINNET_API_URL, skip_ws=True, perp_dexs=[dex])
 
 # Get positions with DEX parameter
 print("=== Current Exchange Positions (xyz DEX) ===")
@@ -66,13 +70,12 @@ if len(open_orders) > 0:
         print("\nCancelling all orders...")
         from hyperliquid.utils.signing import CancelRequest
         
-        # Initialize exchange with vault_address for xyz DEX
+        # Initialize exchange with perp_dexs for xyz DEX support
         import eth_account
         wallet = eth_account.Account.from_key(private_key)
         
-        # For xyz DEX, we need to use the correct approach
-        # The coin names like 'xyz:NVDA' need to be sent as-is
-        exchange = Exchange(wallet, constants.MAINNET_API_URL, account_address=account_address)
+        # For xyz DEX, we need to initialize with perp_dexs parameter
+        exchange = Exchange(wallet, constants.MAINNET_API_URL, account_address=account_address, perp_dexs=[dex])
         
         # Build cancel requests - group by coin
         by_coin = {}
@@ -93,15 +96,17 @@ if len(open_orders) > 0:
                 batch_oids = oids[i:i+batch_size]
                 batch = [CancelRequest(coin=coin, oid=oid) for oid in batch_oids]
                 try:
-                    # Use builder for xyz DEX  
-                    if dex == 'xyz':
-                        # xyz coins need builder parameter
-                        result = exchange.bulk_cancel(batch, builder={"b": "0x0000000000000000000000000000000000000000", "f": 0})
-                    else:
-                        result = exchange.bulk_cancel(batch)
+                    result = exchange.bulk_cancel(batch)
                     print(f"  Batch {i//batch_size + 1}: Cancelled {len(batch)} orders - status: {result.get('status', 'ok')}")
                 except Exception as e:
-                    print(f"  Batch {i//batch_size + 1}: Error - {e}")
+                    # Try individual cancels as fallback
+                    print(f"  Batch {i//batch_size + 1}: Bulk failed ({e}), trying individual...")
+                    for oid in batch_oids:
+                        try:
+                            result = exchange.cancel(coin, oid)
+                            print(f"    Cancelled oid={oid}")
+                        except Exception as e2:
+                            print(f"    Failed oid={oid}: {e2}")
                 time.sleep(0.3)  # Rate limit
         
         print("\n=== Done ===")

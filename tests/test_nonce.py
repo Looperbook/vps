@@ -1,6 +1,6 @@
 import asyncio
 
-from src.nonce import NonceCoordinator
+from src.infra.nonce import NonceCoordinator
 
 
 def test_shared_lock_for_account():

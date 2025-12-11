@@ -1,4 +1,4 @@
-from src.per_coin_config import load_per_coin_overrides
+from src.config.per_coin_config import load_per_coin_overrides
 from pathlib import Path
 import os
 import sys
@@ -10,7 +10,7 @@ def test_load_per_coin_overrides(tmp_path, monkeypatch):
     p.write_text("BTC: { coalesce_ms: 25 }\nXYZ: { default_strategy: grid }\n")
     monkeypatch.setenv("HL_PER_COIN_CONFIG", str(p))
     # provide a fake yaml module if pyyaml not installed
-    import src.per_coin_config as mod
+    import src.config.per_coin_config as mod
     if "yaml" not in sys.modules:
         fake_yaml = ModuleType("yaml")
 

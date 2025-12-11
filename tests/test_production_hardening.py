@@ -14,8 +14,8 @@ from unittest.mock import MagicMock, AsyncMock, patch
 
 import pytest
 
-from src.metrics import HealthChecker, HealthStatus, Metrics, start_metrics_server
-from src.config_validator import (
+from src.monitoring.metrics import HealthChecker, HealthStatus, Metrics, start_metrics_server
+from src.config.config_validator import (
     ConfigValidator,
     ValidationResult,
     ValidationIssue,
@@ -23,7 +23,7 @@ from src.config_validator import (
     validate_config,
     validate_and_log,
 )
-from src.alerting import (
+from src.monitoring.alerting import (
     Alert,
     AlertConfig,
     AlertManager,

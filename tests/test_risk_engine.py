@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.risk import RiskEngine, RiskEvent, RiskEventType, RiskSnapshot, RiskState
+from src.risk.risk import RiskEngine, RiskEvent, RiskEventType, RiskSnapshot, RiskState
 
 
 @pytest.fixture

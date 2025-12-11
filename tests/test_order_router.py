@@ -1,13 +1,18 @@
 import asyncio
 import time
 
-from src.order_router import OrderRouter, OrderRequest
+from src.execution.order_router import OrderRouter, OrderRequest
 
 
 class FakeExchange:
     def __init__(self, record):
         self._record = record
         self._oid = 1000
+        self._expires_after = None
+
+    def set_expires_after(self, expires_after):
+        """Mock method for order expiry TTL."""
+        self._expires_after = expires_after
 
     async def order(self, coin, is_buy, sz, px, order_type, reduce_only, cloid=None):
         # record start, simulate network latency, record end
@@ -44,6 +49,7 @@ def test_order_router_serializes_with_shared_lock():
             coalesce_ms = 1
             use_cloid = False
             min_notional = 0.0
+            order_ttl_ms = 0  # Disable for test
 
         cfg = Cfg()
         r1 = OrderRouter("COIN", fake, None, cfg, 2, 0.01, 3, lock)

@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
-from src.market_data import CachedMid
-from src.fill_log import FillLog, BatchedFillLog
+from src.market_data.market_data import CachedMid
+from src.execution.fill_log import FillLog, BatchedFillLog
 
 
 # ============================================================================

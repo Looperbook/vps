@@ -16,11 +16,11 @@ from pathlib import Path
 from unittest.mock import Mock, AsyncMock, patch, MagicMock
 from dataclasses import asdict
 
-from src.nonce import NonceCoordinator
+from src.infra.nonce import NonceCoordinator
 from src.bot import GridBot, ActiveOrder
-from src.bot_context import BotContext
-from src.metrics_rich import RichMetrics
-from src.state_atomic import AtomicStateStore
+from src.core.bot_context import BotContext
+from src.monitoring.metrics_rich import RichMetrics
+from src.state.state_atomic import AtomicStateStore
 
 
 @pytest.fixture
@@ -131,6 +131,7 @@ class TestStateConsistencyUnderConcurrency:
             state_dir=str(tmp_path),
             resolve_account=Mock(return_value="Mainnet"),
             http_timeout=10,
+            wal_enabled=False,  # Disable WAL for unit tests
         )
         
         bot = GridBot(
@@ -183,6 +184,7 @@ class TestStateConsistencyUnderConcurrency:
             state_dir=str(tmp_path),
             resolve_account=Mock(return_value="Mainnet"),
             http_timeout=10,
+            wal_enabled=False,  # Disable WAL for unit tests
         )
         
         bot = GridBot(
@@ -293,6 +295,7 @@ class TestGracefulShutdown:
             state_dir=str(tmp_path),
             resolve_account=Mock(return_value="Mainnet"),
             http_timeout=10,
+            wal_enabled=False,  # Disable WAL for unit tests
         )
         
         bot = GridBot(
@@ -329,6 +332,7 @@ class TestGracefulShutdown:
             state_dir=str(tmp_path),
             resolve_account=Mock(return_value="Mainnet"),
             http_timeout=10,
+            wal_enabled=False,  # Disable WAL for unit tests
         )
         
         bot = GridBot(

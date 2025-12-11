@@ -5,11 +5,8 @@ import logging
 import sys
 from io import StringIO
 
-# Add src to path for imports
-sys.path.insert(0, 'src')
-
-from metrics_rich import RichMetrics
-from bot_context import BotContext
+from src.monitoring.metrics_rich import RichMetrics
+from src.core.bot_context import BotContext
 
 
 def test_rich_metrics_counters():
