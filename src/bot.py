@@ -984,7 +984,12 @@ class GridBot:
         # 3. WAL checkpoint - flush all pending writes to disk
         if self.wal:
             try:
-                self.wal.checkpoint()
+                # Get current state for checkpoint
+                position = self.position
+                realized_pnl = self._alltime_realized_pnl
+                last_fill_ms = self.last_fill_time_ms
+                open_order_count = self.order_manager.open_count() if self.order_manager else 0
+                await self.wal.checkpoint(position, realized_pnl, last_fill_ms, open_order_count)
                 self._log_event("wal_checkpoint_complete", reason="shutdown")
             except Exception as e:
                 self._log_event("wal_checkpoint_error", error=str(e))

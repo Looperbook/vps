@@ -637,7 +637,7 @@ class BotOrchestrator:
             # Save state if using state manager
             if self.state_manager and self.config.use_state_manager:
                 if (now - self._last_state_save) > self.config.state_save_interval_sec:
-                    await self.state_manager.save_state()
+                    await self.state_manager.persist()
                     self._last_state_save = now
             
             # Log PnL periodically
@@ -715,7 +715,7 @@ class BotOrchestrator:
         # Save final state
         if self.state_manager and self.config.use_state_manager:
             try:
-                await self.state_manager.save_state()
+                await self.state_manager.persist()
             except Exception as exc:
                 self._log_event("shutdown_state_save_error", error=str(exc))
         

@@ -65,8 +65,13 @@ class MockStateManager:
     def snapshot(self) -> MockStateSnapshot:
         return self._snapshot
     
-    async def save_state(self) -> None:
+    async def persist(self) -> None:
+        """Persist state (renamed from save_state)."""
         self.save_called = True
+    
+    async def save_state(self) -> None:
+        """Alias for persist for backward compatibility in tests."""
+        await self.persist()
 
 
 class MockExecutionGateway:
