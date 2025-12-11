@@ -182,6 +182,11 @@ class GridBot:
         self.ctx = BotContext(coin=self.coin, logger=log)
         # Hardening: Track last stuck order check time
         self._last_stuck_order_check = 0.0
+        # Hardening: Track stuck orders for auto-cancellation
+        # Maps cloid -> first_detected_at_timestamp
+        self._stuck_order_first_seen: Dict[str, float] = {}
+        # Auto-cancel stuck orders after this many seconds (default 90s)
+        self._stuck_order_cancel_threshold_sec = float(os.getenv("HL_STUCK_ORDER_CANCEL_SEC", "90"))
         # Hardening: PnL sanity check threshold (configurable via per-coin or env)
         self._max_single_fill_pnl = float(os.getenv("HL_MAX_SINGLE_FILL_PNL", "500"))
         # Per-run (session) PnL tracking - reset each startup
@@ -343,6 +348,73 @@ class GridBot:
         except Exception:
             pass
         return stuck
+
+    async def _cancel_stuck_orders(self, stuck: List[Any]) -> int:
+        """
+        Cancel orders that have been stuck for too long.
+        
+        Tracks when each stuck order was first seen and cancels it if it's been
+        stuck longer than the threshold.
+        
+        Args:
+            stuck: List of OrderStateRecord for stuck orders
+            
+        Returns:
+            Number of orders cancelled
+        """
+        now = time.time()
+        cancelled_count = 0
+        current_cloids = {r.cloid for r in stuck if r.cloid}
+        
+        # Clean up tracking for orders no longer stuck
+        to_remove = [cloid for cloid in self._stuck_order_first_seen if cloid not in current_cloids]
+        for cloid in to_remove:
+            del self._stuck_order_first_seen[cloid]
+        
+        # Check each stuck order
+        for record in stuck:
+            if not record.cloid:
+                continue
+                
+            # Track first time we saw this order as stuck
+            if record.cloid not in self._stuck_order_first_seen:
+                self._stuck_order_first_seen[record.cloid] = now
+                continue
+            
+            # Check if it's been stuck too long
+            first_seen = self._stuck_order_first_seen[record.cloid]
+            stuck_duration = now - first_seen
+            
+            if stuck_duration >= self._stuck_order_cancel_threshold_sec:
+                try:
+                    self._log_event("stuck_order_auto_cancel", 
+                                   cloid=record.cloid, 
+                                   oid=record.oid,
+                                   stuck_duration_sec=round(stuck_duration, 1),
+                                   side=record.side,
+                                   price=record.price,
+                                   qty=record.original_qty)
+                    
+                    # Cancel via order router
+                    await self.router.safe_cancel(cloid=record.cloid, oid=record.oid)
+                    
+                    # Transition to EXPIRED in state machine
+                    self.order_state_machine.transition(
+                        cloid=record.cloid,
+                        to_state=OrderState.EXPIRED,
+                        reason="stuck_order_auto_cancel"
+                    )
+                    
+                    # Remove from tracking
+                    del self._stuck_order_first_seen[record.cloid]
+                    cancelled_count += 1
+                    
+                except Exception as exc:
+                    self._log_event("stuck_order_cancel_error",
+                                   cloid=record.cloid,
+                                   err=str(exc))
+        
+        return cancelled_count
 
     def _get_config_value(self, key: str, default=None):
         """Get config value with per-coin override support."""
@@ -552,6 +624,10 @@ class GridBot:
                     if stuck:
                         self._log_event("stuck_orders_detected", count=len(stuck), 
                                        cloids=[r.cloid for r in stuck[:5]])  # Log first 5
+                        # Auto-cancel orders stuck too long
+                        cancelled = await self._cancel_stuck_orders(stuck)
+                        if cancelled > 0:
+                            self._log_event("stuck_orders_auto_cancelled", count=cancelled)
                     self._last_stuck_order_check = now_t
                 
                 if now_t - self.last_pnl_log > self.cfg.pnl_log_interval:
