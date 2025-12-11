@@ -119,6 +119,11 @@ async def main() -> None:
             await shared_info_client.aclose()
         except Exception:
             pass
+        # Disconnect hyperliquid SDK websocket to stop its background thread
+        try:
+            info.disconnect_websocket()
+        except Exception:
+            pass
         log.info("Shutdown complete")
 
 

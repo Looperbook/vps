@@ -43,8 +43,8 @@ class AsyncExchange:
         self._exchange.set_expires_after(expires_after)
 
     async def close(self, wait: bool = True) -> None:
-        # prefer graceful shutdown to avoid leaking threads between restarts
-        self._executor.shutdown(wait=wait)
+        # Graceful shutdown - cancel pending futures and wait for running ones
+        self._executor.shutdown(wait=wait, cancel_futures=True)
 
     async def _call(self, fn, retries: int = 2) -> Any:
         loop = asyncio.get_running_loop()
