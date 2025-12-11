@@ -493,6 +493,13 @@ class GridBot:
             cancel_threshold_sec=self._stuck_order_cancel_threshold_sec,
         )
 
+    async def _check_and_cancel_stuck(self) -> int:
+        """Check for stuck orders and cancel them if they've been stuck too long."""
+        stuck = self._check_stuck_orders()
+        if stuck:
+            return await self._cancel_stuck_orders(stuck)
+        return 0
+
     def _get_config_value(self, key: str, default=None):
         """Get config value with per-coin override support."""
         # Check per_coin_cfg first, then fall back to global cfg
