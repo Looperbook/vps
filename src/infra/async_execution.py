@@ -38,6 +38,10 @@ class AsyncExchange:
     async def bulk_cancel_by_cloid(self, *args, **kwargs) -> Any:
         return await self._call(lambda: self._exchange.bulk_cancel_by_cloid(*args, **kwargs))
 
+    def set_expires_after(self, expires_after: Optional[int]) -> None:
+        """Set expires_after on the underlying exchange (synchronous, no need to wrap)."""
+        self._exchange.set_expires_after(expires_after)
+
     async def close(self, wait: bool = True) -> None:
         # prefer graceful shutdown to avoid leaking threads between restarts
         self._executor.shutdown(wait=wait)
