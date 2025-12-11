@@ -28,7 +28,7 @@ from src.infra.async_execution import AsyncExchange
 from src.app import run_all
 from src.execution.fill_log_manager import start_compactor
 from src.config.config_validator import validate_and_log
-from src.monitoring.alerting import configure_alerts, get_alert_manager, AlertSeverity
+from src.monitoring.alerting import configure_alerts, AlertSeverity
 
 log = build_logger("gridbot")
 

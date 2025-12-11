@@ -239,9 +239,9 @@ class FillProcessor:
     
     def _default_log_event(self, event: str, **data: Any) -> None:
         """Default logging if no callback provided."""
-        import json
+        from src.core.json_utils import dumps as json_dumps
         payload = {"event": event, "coin": self.coin, **data}
-        log.info(json.dumps(payload))
+        log.info(json_dumps(payload))
     
     def validate_fill_timestamp(self, ts_ms: int, current_time_ms: int) -> bool:
         """

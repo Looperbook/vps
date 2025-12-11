@@ -10,17 +10,17 @@ Production-optimized:
 
 from __future__ import annotations
 
-import asyncio
 import atexit
-import json
 import logging
-import os
 import queue
 import sys
 import threading
 import time
 from datetime import datetime
 from typing import Dict, Optional, Set
+
+# Use fast JSON for high-frequency logging
+from src.core.json_utils import dumps as json_dumps, loads as json_loads
 
 try:  # rich is optional; fallback to plain stream if unavailable
     from rich.logging import RichHandler
@@ -37,7 +37,7 @@ DEBUG = logging.DEBUG               # High-frequency debug (order intents, mid p
 
 
 class JsonFormatter(logging.Formatter):
-    """Compact JSON formatter for structured log ingestion."""
+    """Compact JSON formatter for structured log ingestion using fast orjson."""
     
     def format(self, record: logging.LogRecord) -> str:
         ts = time.time()
@@ -50,7 +50,7 @@ class JsonFormatter(logging.Formatter):
         }
         if record.exc_info:
             payload["exc_info"] = self.formatException(record.exc_info)
-        return json.dumps(payload, separators=(",", ":"))
+        return json_dumps(payload)
 
 
 class AsyncQueueHandler(logging.Handler):
@@ -121,9 +121,9 @@ class ThrottledFilter(logging.Filter):
         msg = record.getMessage()
         # Try to extract event name from JSON
         try:
-            data = json.loads(msg)
+            data = json_loads(msg)
             event = data.get("event", "")
-        except (json.JSONDecodeError, TypeError):
+        except Exception:
             return True  # Not JSON, allow through
         
         if event not in self._throttled_events:
@@ -223,5 +223,5 @@ def log_event(
         log_event(log, "fill", level=INFO, side="buy", px=100.0)
     """
     payload = {"event": event, **data}
-    logger.log(level, json.dumps(payload))
+    logger.log(level, json_dumps(payload))
 

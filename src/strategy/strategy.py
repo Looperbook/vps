@@ -5,7 +5,6 @@ Grid strategy with ATR/EWMA spacing, trend bias, and inventory skew.
 from __future__ import annotations
 
 import logging
-import json
 import math
 from collections import deque
 from dataclasses import dataclass
@@ -13,7 +12,10 @@ from typing import Deque, List, Optional, Tuple
 import random
 
 from src.config.config import Settings
-from src.core.utils import tick_to_decimals
+from src.core.json_utils import dumps as json_dumps
+
+# Module-level logger for consistent usage
+log = logging.getLogger("gridbot")
 
 
 @dataclass
@@ -112,8 +114,8 @@ class GridStrategy:
     def on_price(self, price: float) -> Tuple[float, float]:
         self.last_atr, self.last_vol = self.vol_model.step(price)
         if self._log():
-            logging.getLogger("gridbot").info(
-                json.dumps(
+            log.debug(
+                json_dumps(
                     {
                         "event": "price_update",
                         "px": price,
@@ -165,8 +167,8 @@ class GridStrategy:
         if total_grid_width < min_total_width:
             old_spacing = spacing
             spacing = min_total_width / (self.effective_grids * 2)
-            logging.getLogger("gridbot").warning(
-                json.dumps({
+            log.warning(
+                json_dumps({
                     "event": "grid_compression_override",
                     "raw_spacing": raw,
                     "computed_spacing": old_spacing,
@@ -184,8 +186,8 @@ class GridStrategy:
             old_spacing = spacing
             spacing = min_per_level
             if self._log():
-                logging.getLogger("gridbot").warning(
-                    json.dumps({
+                log.warning(
+                    json_dumps({
                         "event": "spacing_compression_prevented",
                         "old_spacing": old_spacing,
                         "new_spacing": spacing,
@@ -194,8 +196,8 @@ class GridStrategy:
                 )
         
         if self._log():
-            logging.getLogger("gridbot").info(
-                json.dumps(
+            log.debug(
+                json_dumps(
                     {
                         "event": "spacing_compute",
                         "px": px,
@@ -215,12 +217,12 @@ class GridStrategy:
         bias = max(min(delta / max(px, 1e-9), 0.004), -0.004)
         sign = 1 if bias > 0 else -1 if bias < 0 else 0
         if sign != self.last_trend_sign:
-            logging.getLogger("gridbot").info(
-                json.dumps({"event": "trend_flip", "prev_sign": self.last_trend_sign, "new_sign": sign, "bias": bias})
+            log.info(
+                json_dumps({"event": "trend_flip", "prev_sign": self.last_trend_sign, "new_sign": sign, "bias": bias})
             )
             self.last_trend_sign = sign
         if self._log():
-            logging.getLogger("gridbot").info(json.dumps({"event": "trend_bias", "px": px, "delta": delta, "bias": bias}))
+            log.debug(json_dumps({"event": "trend_bias", "px": px, "delta": delta, "bias": bias}))
         return bias
 
     def build_grid(self, mid: float, position: float = 0.0) -> List[GridLevel]:
@@ -235,8 +237,8 @@ class GridStrategy:
             levels.append(GridLevel("buy", dn_px, 0.0))
         self.grid_center = mid
         if self._log():
-            logging.getLogger("gridbot").info(
-                json.dumps(
+            log.info(
+                json_dumps(
                     {
                         "event": "grid_built",
                         "mid": mid,

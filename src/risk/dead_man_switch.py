@@ -15,6 +15,7 @@ Features:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from typing import Any, Optional, Callable
@@ -82,8 +83,8 @@ class DeadManSwitch:
             "errors": 0,
         }
     
-    def _default_log(self, event: str, **kwargs) -> None:
-        log.info(f'{{"event":"{event}",{",".join(f"{k}:{v}" for k,v in kwargs.items())}}}')
+    def _default_log(self, event: str, **kwargs: Any) -> None:
+        log.info(json.dumps({"event": event, **kwargs}))
     
     def _now_ms(self) -> int:
         return int(time.time() * 1000)

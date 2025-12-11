@@ -21,7 +21,7 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from src.monitoring.status import StatusBoard
     from src.market_data.market_data import MarketData
     from src.monitoring.metrics_rich import RichMetrics
+    from src.bot import GridBot
 
 import logging
 

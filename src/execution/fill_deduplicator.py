@@ -10,6 +10,7 @@ Handles:
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -53,9 +54,9 @@ class FillDeduplicator:
         # M-1 FIX: Track last fill timestamp per coin for sequence gap detection
         self._last_fill_ts: Dict[str, int] = {}  # coin -> last fill timestamp ms
     
-    def _default_log(self, event: str, **kwargs) -> None:
+    def _default_log(self, event: str, **kwargs: Any) -> None:
         """Default logging implementation."""
-        log.debug(f'{{"event":"{event}",{",".join(f"{k}:{v}" for k,v in kwargs.items())}}}')
+        log.debug(json.dumps({"event": event, **kwargs}))
     
     @staticmethod
     def make_fill_key(fill: Dict[str, Any]) -> str:

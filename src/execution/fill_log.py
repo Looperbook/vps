@@ -11,13 +11,14 @@ Includes BatchedFillLog for optimized batch writes (Optimization-2).
 from __future__ import annotations
 
 import asyncio
-import json
 import gzip
 import shutil
 import os
 import logging
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
+
+from src.core.json_utils import dumps as json_dumps, loads as json_loads
 
 
 class FillLog:
@@ -42,7 +43,7 @@ class FillLog:
         Performs minimal checks and periodically rotates the file when size exceeds threshold.
         Calls on_write_error callback if write fails.
         """
-        line = json.dumps(event, separators=(",", ":")) + "\n"
+        line = json_dumps(event) + "\n"
         write_error_msg = None
         async with self._lock:
             loop = asyncio.get_running_loop()
@@ -129,7 +130,7 @@ class FillLog:
                             if not ln:
                                 continue
                             try:
-                                obj = json.loads(ln)
+                                obj = json_loads(ln)
                                 t = int(obj.get("time", 0))
                                 if t > start_ms:
                                     out.append(obj)
@@ -160,7 +161,7 @@ class FillLog:
                             if not ln:
                                 continue
                             try:
-                                obj = json.loads(ln)
+                                obj = json_loads(ln)
                                 t = int(obj.get("time", 0))
                                 if t > keep_since_ms:
                                     lines.append(ln + "\n")
@@ -214,7 +215,7 @@ class BatchedFillLog(FillLog):
         if self._flush_task is None:
             self._stopping = False
             self._flush_task = asyncio.create_task(self._flush_loop())
-            self._logger.info(json.dumps({
+            self._logger.info(json_dumps({
                 "event": "batched_fill_log_start",
                 "path": str(self.path),
                 "flush_interval": self._flush_interval,
@@ -232,7 +233,7 @@ class BatchedFillLog(FillLog):
             self._flush_task = None
         # Final flush on shutdown
         await self._flush()
-        self._logger.info(json.dumps({
+        self._logger.info(json_dumps({
             "event": "batched_fill_log_stop",
             "path": str(self.path),
         }))
@@ -242,7 +243,7 @@ class BatchedFillLog(FillLog):
         
         If buffer exceeds max_buffer_size, triggers immediate flush.
         """
-        line = json.dumps(event, separators=(",", ":")) + "\n"
+        line = json_dumps(event) + "\n"
         should_flush = False
         async with self._buffer_lock:
             self._buffer.append(line)
@@ -260,7 +261,7 @@ class BatchedFillLog(FillLog):
             except asyncio.CancelledError:
                 break
             except Exception as exc:
-                self._logger.warning(json.dumps({
+                self._logger.warning(json_dumps({
                     "event": "batched_fill_log_flush_error",
                     "err": str(exc),
                 }))
@@ -304,7 +305,7 @@ class BatchedFillLog(FillLog):
                     return None
                 except Exception as exc:
                     # Log but don't raise - append is best-effort
-                    self._logger.warning(json.dumps({
+                    self._logger.warning(json_dumps({
                         "event": "batched_fill_log_write_error",
                         "err": str(exc),
                         "lines_lost": len(lines),

@@ -12,6 +12,7 @@ Handles:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
@@ -65,9 +66,9 @@ class PositionTracker:
         self._log_event = log_event or self._default_log
         self._last_update_ms: int = 0
     
-    def _default_log(self, event: str, **kwargs) -> None:
+    def _default_log(self, event: str, **kwargs: Any) -> None:
         """Default logging implementation."""
-        log.debug(f'{{"event":"{event}",{",".join(f"{k}:{v}" for k,v in kwargs.items())}}}')
+        log.debug(json.dumps({"event": event, **kwargs}))
     
     @property
     def position(self) -> float:

@@ -26,7 +26,7 @@ class StateStore:
         try:
             return json.loads(self.path.read_text())
         except Exception as exc:
-            log.error(f"state_load_error:{exc}")
+            log.error(json.dumps({"event": "state_load_error", "error": str(exc)}))
             return {}
 
     def save(self, data: Dict[str, Any]) -> None:
@@ -34,4 +34,4 @@ class StateStore:
             self.tmp.write_text(json.dumps(data, indent=2))
             self.tmp.replace(self.path)
         except Exception as exc:
-            log.error(f"state_save_error:{exc}")
+            log.error(json.dumps({"event": "state_save_error", "error": str(exc)}))

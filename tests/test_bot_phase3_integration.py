@@ -199,5 +199,5 @@ async def run_integration():
 
 
 def test_phase3_integration():
-    asyncio.get_event_loop().run_until_complete(run_integration())
+    asyncio.run(run_integration())
 

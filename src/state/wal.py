@@ -378,7 +378,7 @@ class WriteAheadLog:
                         data = json.load(f)
                     return WALCheckpoint.from_dict(data)
                 except Exception as e:
-                    log.warning(f"Failed to load checkpoint: {e}")
+                    log.warning(json.dumps({"event": "checkpoint_load_failed", "error": str(e)}))
                     return None
             
             checkpoint = await loop.run_in_executor(None, _load_checkpoint)
@@ -409,15 +409,15 @@ class WriteAheadLog:
                                     entry.checksum = expected
                                     
                                     if expected and computed != expected:
-                                        log.warning(f"WAL entry {entry.sequence} checksum mismatch")
+                                        log.warning(json.dumps({"event": "wal_checksum_mismatch", "sequence": entry.sequence}))
                                         continue
                                     
                                     entries.append(entry)
                             except Exception as e:
-                                log.warning(f"Failed to parse WAL entry: {e}")
+                                log.warning(json.dumps({"event": "wal_parse_failed", "error": str(e)}))
                                 continue
                 except Exception as e:
-                    log.error(f"Failed to read WAL: {e}")
+                    log.error(json.dumps({"event": "wal_read_failed", "error": str(e)}))
                 
                 return entries
             

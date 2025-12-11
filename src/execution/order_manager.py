@@ -185,10 +185,10 @@ class OrderManager:
             self._unindex(rec)
             return rec
         
-        # Partial fill: keep order in registry
-        log.info(f'{{"event":"partial_fill","cloid":"{cloid}","oid":{oid},'
-                 f'"fill_sz":{fill_sz},"filled_qty":{rec.filled_qty},'
-                 f'"original_qty":{rec.original_qty},"remaining":{remaining}}}')
+        # Partial fill: keep order in registry (DEBUG level - high frequency event)
+        log.debug('{"event":"partial_fill","cloid":"%s","oid":%s,'
+                  '"fill_sz":%s,"filled_qty":%s,"original_qty":%s,"remaining":%s}',
+                  cloid, oid, fill_sz, rec.filled_qty, rec.original_qty, remaining)
         return rec
     
     def unindex(self, rec: ActiveOrder) -> None:

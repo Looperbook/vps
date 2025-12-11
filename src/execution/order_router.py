@@ -5,13 +5,11 @@ Nonce-safe order router serializing submissions and cancels.
 from __future__ import annotations
 
 import asyncio
-import json
 import time
 import secrets
 from dataclasses import dataclass
 from typing import Any, Optional
 from collections import deque
-from statistics import median
 
 from hyperliquid.exchange import Exchange
 from hyperliquid.info import Info
@@ -20,8 +18,12 @@ from hyperliquid.utils.types import Cloid
 from src.config.config import Settings
 from src.core.utils import quantize, is_divisible, tick_to_decimals
 from src.core.rounding import round_price, snap_to_tick
+from src.core.json_utils import dumps as json_dumps
 import logging
 import random
+
+# Module-level logger for consistent usage
+log = logging.getLogger("gridbot")
 
 
 @dataclass
@@ -109,8 +111,8 @@ class OrderRouter:
             self._high_vol_mode = True
             self._vol_mode_until = now + 30.0  # Stay in high-vol mode for 30s
             self.coalesce_ms = self.coalesce_min_ms
-            logging.getLogger("gridbot").debug(
-                json.dumps({"event": "router_high_vol_mode", "coin": self.coin, 
+            log.debug(
+                json_dumps({"event": "router_high_vol_mode", "coin": self.coin, 
                            "volatility": volatility, "coalesce_ms": self.coalesce_ms})
             )
         elif volatility > 0.01:  # 1-2% - moderate delay
@@ -153,7 +155,7 @@ class OrderRouter:
         # Sample router_enqueue to reduce spam - use DEBUG level since it's high-frequency
         sample = getattr(self.cfg, "log_submit_sample", 0.05)
         if random.random() < sample:
-            logging.getLogger("gridbot").debug(json.dumps({"event": "router_enqueue", "coin": self.coin, "side": "buy" if req.is_buy else "sell", "px": req.px, "sz": req.sz}))
+            log.debug(json_dumps({"event": "router_enqueue", "coin": self.coin, "side": "buy" if req.is_buy else "sell", "px": req.px, "sz": req.sz}))
         return await fut
 
     async def _run(self) -> None:
@@ -183,7 +185,7 @@ class OrderRouter:
             except asyncio.CancelledError:
                 break
             except Exception as exc:
-                logging.getLogger("gridbot").error(json.dumps({"event": "router_worker_error", "coin": self.coin, "err": str(exc)}))
+                log.error(json_dumps({"event": "router_worker_error", "coin": self.coin, "err": str(exc)}))
                 # do not drop outstanding futures silently
                 for req, fut in locals().get("batch", []):
                     if fut and not fut.done():
@@ -233,11 +235,11 @@ class OrderRouter:
             px = round(px, self.tick_decimals)
             if not is_divisible(px, self.tick_sz):
                 fut.set_exception(RuntimeError("invalid_price_tick"))
-                logging.getLogger("gridbot").error(json.dumps({"event": "router_invalid_price", "coin": self.coin, "px": px, "tick": self.tick_sz}))
+                log.error(json_dumps({"event": "router_invalid_price", "coin": self.coin, "px": px, "tick": self.tick_sz}))
                 return
             if px * req.sz < self.cfg.min_notional:
                 fut.set_result(None)
-                logging.getLogger("gridbot").info(json.dumps({"event": "router_skip_notional", "coin": self.coin, "px": px, "sz": req.sz}))
+                log.debug(json_dumps({"event": "router_skip_notional", "coin": self.coin, "px": px, "sz": req.sz}))
                 return
             cloid = None
             if self.use_cloid:
@@ -250,8 +252,8 @@ class OrderRouter:
                     req.cloid = str(cloid)
             sample = getattr(self.cfg, "log_submit_sample", 0.05)
             if random.random() < sample:
-                logging.getLogger("gridbot").debug(
-                    json.dumps(
+                log.debug(
+                    json_dumps(
                         {
                             "event": "router_send",
                             "coin": self.coin,
@@ -292,14 +294,14 @@ class OrderRouter:
                 pass
             err_msg = self._extract_error_message(resp)
             if err_msg:
-                logging.getLogger("gridbot").error(json.dumps({"event": "router_error", "coin": self.coin, "err": err_msg}))
+                log.error(json_dumps({"event": "router_error", "coin": self.coin, "err": err_msg}))
                 fut.set_exception(RuntimeError(err_msg))
                 return
             oid, cl = self._extract_ids(resp)
             fut.set_result({"resp": resp, "oid": oid, "cloid": cl or (str(cloid) if cloid else None)})
             self._log_submit(req.is_buy, px, req.sz, oid, cl or (str(cloid) if cloid else None))
         except Exception as exc:
-            logging.getLogger("gridbot").error(json.dumps({"event": "router_error", "coin": self.coin, "err": str(exc)}))
+            log.error(json_dumps({"event": "router_error", "coin": self.coin, "err": str(exc)}))
             fut.set_exception(exc)
 
     async def _flush_bulk(self, batch: list[tuple[OrderRequest, asyncio.Future]], order_type: dict) -> None:
@@ -314,11 +316,11 @@ class OrderRouter:
             px = round(px, self.tick_decimals)
             if not is_divisible(px, self.tick_sz):
                 fut.set_exception(RuntimeError("invalid_price_tick"))
-                logging.getLogger("gridbot").error(json.dumps({"event": "router_invalid_price", "coin": self.coin, "px": px, "tick": self.tick_sz}))
+                log.error(json_dumps({"event": "router_invalid_price", "coin": self.coin, "px": px, "tick": self.tick_sz}))
                 continue
             if px * req.sz < self.cfg.min_notional:
                 fut.set_result(None)
-                logging.getLogger("gridbot").info(json.dumps({"event": "router_skip_notional", "coin": self.coin, "px": px, "sz": req.sz}))
+                log.debug(json_dumps({"event": "router_skip_notional", "coin": self.coin, "px": px, "sz": req.sz}))
                 continue
             cloid = None
             if self.use_cloid:
@@ -334,8 +336,8 @@ class OrderRouter:
                 cloids.append(None)
             sample = getattr(self.cfg, "log_submit_sample", 0.05)
             if random.random() < sample:
-                logging.getLogger("gridbot").info(
-                    json.dumps(
+                log.debug(
+                    json_dumps(
                         {
                             "event": "router_send",
                             "coin": self.coin,
@@ -363,12 +365,11 @@ class OrderRouter:
         if not reqs:
             return
         resp = await self.exchange.bulk_orders(reqs)
-        log = logging.getLogger("gridbot")
         statuses = self._extract_statuses(resp)
         if not statuses:
             err_msg = self._extract_error_message(resp)
             if err_msg:
-                log.error(json.dumps({"event": "router_error", "coin": self.coin, "err": err_msg, "status_count": len(statuses)}))
+                log.error(json_dumps({"event": "router_error", "coin": self.coin, "err": err_msg, "status_count": len(statuses)}))
                 for idx in idx_map:
                     _, fut = batch[idx]
                     fut.set_exception(RuntimeError(err_msg))
@@ -378,7 +379,7 @@ class OrderRouter:
                 req, fut = batch[idx]
                 cloid_val = cloids[pos] if pos < len(cloids) else req.cloid
                 fut.set_result({"resp": resp, "oid": None, "cloid": cloid_val})
-            log.info(json.dumps({"event": "router_missing_status", "coin": self.coin, "resp": resp}))
+            log.info(json_dumps({"event": "router_missing_status", "coin": self.coin, "resp": resp}))
             return
         pos_by_idx = {idx: pos for pos, idx in enumerate(idx_map)}
         for pos, st in enumerate(statuses):
@@ -388,7 +389,7 @@ class OrderRouter:
             req, fut = batch[i]
             try:
                 if isinstance(st, dict) and st.get("error"):
-                    log.error(json.dumps({"event": "router_error_status", "coin": self.coin, "err": st.get("error"), "px": req.px, "sz": req.sz}))
+                    log.error(json_dumps({"event": "router_error_status", "coin": self.coin, "err": st.get("error"), "px": req.px, "sz": req.sz}))
                     fut.set_exception(RuntimeError(str(st.get("error"))))
                     continue
                 oid, cl = self._extract_ids(st)
@@ -397,7 +398,7 @@ class OrderRouter:
                 px = quantize(req.px, self.tick_sz, "buy" if req.is_buy else "sell", self.px_decimals)
                 self._log_submit(req.is_buy, px, req.sz, oid, cloid_val)
             except Exception as exc:
-                log.error(json.dumps({"event": "router_error", "coin": self.coin, "err": str(exc)}))
+                log.error(json_dumps({"event": "router_error", "coin": self.coin, "err": str(exc)}))
                 fut.set_exception(exc)
         # Resolve any futures that didn't get a status (avoid hanging callers)
         for idx, (req, fut) in enumerate(batch):
@@ -408,7 +409,7 @@ class OrderRouter:
             fut.set_result({"resp": resp, "oid": None, "cloid": cloid_val})
             sample = getattr(self.cfg, "log_submit_sample", 0.05)
             if random.random() < sample:
-                log.info(json.dumps({"event": "router_missing_status", "coin": self.coin, "px": req.px, "sz": req.sz}))
+                log.info(json_dumps({"event": "router_missing_status", "coin": self.coin, "px": req.px, "sz": req.sz}))
 
     def _extract_ids(self, resp: Any) -> tuple[Optional[int], Optional[str]]:
         """
@@ -487,8 +488,6 @@ class OrderRouter:
         return None
 
     def _log_submit(self, is_buy: bool, px: float, sz: float, oid: Optional[int], cloid: Optional[str]) -> None:
-        import logging
-
         # Sample to limit log volume; always log if oid is None or on errors
         try:
             sample = float(self.cfg.log_submit_sample)
@@ -497,8 +496,8 @@ class OrderRouter:
         if oid is not None and random.random() >= sample:
             return
         if random.random() < sample:
-            logging.getLogger("gridbot").info(
-                json.dumps(
+            log.info(
+                json_dumps(
                     {
                         "event": "order_submit",
                         "coin": self.coin,
@@ -532,7 +531,7 @@ class OrderRouter:
                 if co is not None:
                     try:
                         await self.exchange.cancel_by_cloid(self.coin, co)
-                        logging.getLogger("gridbot").info(json.dumps({"event": "cancel", "coin": self.coin, "cloid": str(co)}))
+                        log.debug(json_dumps({"event": "cancel", "coin": self.coin, "cloid": str(co)}))
                         return
                     except Exception as exc:
                         first_err = exc
@@ -544,13 +543,13 @@ class OrderRouter:
                 if oid_int is not None:
                     try:
                         await self.exchange.cancel(self.coin, oid_int)
-                        logging.getLogger("gridbot").info(json.dumps({"event": "cancel", "coin": self.coin, "oid": oid_int}))
+                        log.debug(json_dumps({"event": "cancel", "coin": self.coin, "oid": oid_int}))
                         return
                     except Exception as exc:
                         first_err = first_err or exc
             if first_err:
-                logging.getLogger("gridbot").error(
-                    json.dumps({"event": "cancel_error", "coin": self.coin, "err": str(first_err), "cloid_type": str(type(cloid)), "oid_type": str(type(oid))})
+                log.error(
+                    json_dumps({"event": "cancel_error", "coin": self.coin, "err": str(first_err), "cloid_type": str(type(cloid)), "oid_type": str(type(oid))})
                 )
 
     async def cancel_all(self) -> None:

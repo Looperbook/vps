@@ -11,17 +11,13 @@ Production-hardened grid trading bot with:
 from __future__ import annotations
 
 import asyncio
-import json
 import math
 import os
-import random
 import secrets
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
-from dataclasses import dataclass
 
-from hyperliquid.exchange import Exchange
 from hyperliquid.info import Info
 
 from src.config.config import Settings
@@ -30,19 +26,19 @@ from src.market_data.market_data import MarketData
 from src.monitoring.metrics import Metrics
 from src.monitoring.metrics_rich import RichMetrics
 from src.core.bot_context import BotContext
-from src.execution.order_router import OrderRequest, OrderRouter
+from src.execution.order_router import OrderRouter
 from src.execution.order_manager import OrderManager, ActiveOrder
 from src.risk.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 from src.execution.fill_deduplicator import FillDeduplicator
 from src.state.position_tracker import PositionTracker
-from src.strategy.grid_calculator import GridCalculator, GridBuildResult, GridDiff
+from src.strategy.grid_calculator import GridCalculator
 from src.execution.order_state_machine import OrderStateMachine, OrderState
 from src.risk.risk import RiskEngine
 from src.state.state_atomic import AtomicStateStore
 from src.execution.fill_log import FillLog, BatchedFillLog
 from src.strategy.strategy import GridLevel, GridStrategy
 from src.strategy.strategy_factory import StrategyFactory
-from src.core.utils import now_ms, quantize, tick_to_decimals
+from src.core.utils import now_ms, quantize
 from src.monitoring.status import StatusBoard
 # S-1, S-2, S-3 Structural Improvements
 from src.state.shadow_ledger import ShadowLedger
@@ -50,23 +46,22 @@ from src.core.event_bus import EventBus, EventType, Event
 from src.execution.order_sync import OrderSync
 # Production hardening improvements
 from src.state.wal import WriteAheadLog, WALEntryType
-from src.strategy.grid_snapshot import SnapshotManager, GridSnapshot, compute_grid_diff_from_snapshot
-from src.risk.dead_man_switch import DeadManSwitch, DeadManSwitchStub
+from src.strategy.grid_snapshot import SnapshotManager
+from src.risk.dead_man_switch import DeadManSwitch
 # Architecture refactor: Extracted modules
-from src.execution.fill_processor import FillProcessor, FillProcessorConfig, FillResult
-from src.state.state_manager import StateManager, StateManagerConfig, StateSnapshot
+from src.execution.fill_processor import FillProcessor, FillProcessorConfig
+from src.state.state_manager import StateManager, StateManagerConfig
 from src.execution.execution_gateway import ExecutionGateway, ExecutionGatewayConfig
 from src.execution.grid_builder import GridBuilder, GridBuilderConfig
 from src.orchestrator.bot_orchestrator import (
     BotOrchestrator, OrchestratorConfig, CycleCallbacks, CycleAction, ComponentRefs
 )
-from src.execution.rest_poller import RestPoller, RestPollerConfig, PollResult
+from src.execution.rest_poller import RestPoller, RestPollerConfig
 from src.execution.reconciliation_service import (
-    ReconciliationService, ReconciliationConfig,
-    PositionReconcileResult, OrderReconcileResult
+    ReconciliationService, ReconciliationConfig
 )
 from src.bot_logger import BotLogger, BotLoggerConfig
-from src.meta_loader import MetaLoader, MetaResult
+from src.meta_loader import MetaLoader
 
 log = build_logger("gridbot")
 # Current state schema version for migration support

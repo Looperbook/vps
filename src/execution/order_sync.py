@@ -14,11 +14,12 @@ Features:
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from src.execution.order_manager import OrderManager, ActiveOrder
-from src.execution.order_state_machine import OrderStateMachine, OrderState, OrderStateRecord
+from src.execution.order_state_machine import OrderStateMachine, OrderStateRecord
 from src.strategy.strategy import GridLevel
 
 log = logging.getLogger("gridbot")
@@ -87,7 +88,7 @@ class OrderSync:
     
     def _default_log(self, event: str, **kwargs: Any) -> None:
         """Default logging when no callback provided."""
-        log.debug(f'{{"event":"{event}",{",".join(f"{k}:{v}" for k,v in kwargs.items())}}}')
+        log.debug(json.dumps({"event": event, **kwargs}))
     
     # -------------------------------------------------------------------------
     # Order Registration

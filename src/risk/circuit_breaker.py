@@ -11,10 +11,11 @@ Handles:
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 log = logging.getLogger("gridbot")
 
@@ -53,9 +54,9 @@ class CircuitBreaker:
         self._on_reset = on_reset
         self._log_event = log_event or self._default_log
     
-    def _default_log(self, event: str, **kwargs) -> None:
+    def _default_log(self, event: str, **kwargs: Any) -> None:
         """Default logging implementation."""
-        log.info(f'{{"event":"{event}",{",".join(f"{k}:{v}" for k,v in kwargs.items())}}}')
+        log.info(json.dumps({"event": event, **kwargs}))
     
     @property
     def is_tripped(self) -> bool:

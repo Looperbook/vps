@@ -8,7 +8,6 @@ only recent events as configured by `Settings.fill_log_retention_days`.
 from __future__ import annotations
 
 import asyncio
-import time
 from typing import List
 
 from src.execution.fill_log import FillLog
