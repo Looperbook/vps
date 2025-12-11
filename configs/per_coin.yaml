@@ -8,4 +8,6 @@
 #   coalesce_ms       - Order coalescing window in milliseconds
 #   default_strategy  - Strategy type (default: grid)
 
-# No overrides - using .env settings for all coins
+# Coins to trade (using .env defaults for all settings)
+xyz:NVDA: {}
+xyz:TSLA: {}
