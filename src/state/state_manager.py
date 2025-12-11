@@ -148,6 +148,7 @@ class StateManager:
         self._session_start_time: float = time.time()
         
         # Logging
+        self.log = log  # Module-level logger for DEBUG messages
         self._log_event = self.config.log_event_callback or self._default_log
     
     def _default_log(self, event: str, **kwargs: Any) -> None:
@@ -329,12 +330,10 @@ class StateManager:
             # Load grid center
             self._grid_center = data.get("grid_center")
             
-            self._log_event(
-                "state_loaded",
-                position=position,
-                alltime_pnl=self._alltime_realized_pnl,
-                last_fill_ms=self._last_fill_time_ms,
-                grid_center=self._grid_center,
+            # DEBUG level - fires every loop iteration
+            self.log.debug(
+                "state_loaded pos=%s pnl=%s grid_center=%s",
+                position, self._alltime_realized_pnl, self._grid_center
             )
             
             return StateSnapshot(

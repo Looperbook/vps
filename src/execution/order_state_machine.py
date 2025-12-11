@@ -204,14 +204,10 @@ class OrderStateMachine:
         
         self._stats["total_created"] += 1
         
-        self._log_event(
-            "order_state_created",
-            cloid=cloid,
-            oid=oid,
-            side=side,
-            price=price,
-            qty=qty,
-            state=record.state.name,
+        # Demote to DEBUG - too noisy during grid builds
+        log.debug(
+            "order_created cloid=%s side=%s px=%s sz=%s",
+            cloid, side, price, qty
         )
         
         return record
@@ -353,18 +349,26 @@ class OrderStateMachine:
         elif to_state == OrderState.REJECTED:
             self._stats["total_rejected"] += 1
         
-        # Log transition
-        self._log_event(
-            "order_state_transition",
-            cloid=cloid,
-            oid=oid,
-            from_state=from_state.name,
-            to_state=to_state.name,
-            reason=reason,
-            fill_qty=fill_qty,
-            filled_qty=record.filled_qty,
-            remaining_qty=record.remaining_qty,
-        )
+        # Log transition - demote ACKs to DEBUG level
+        if from_state == OrderState.PENDING and to_state == OrderState.OPEN:
+            # Routine ACK - just log at DEBUG level
+            log.debug(
+                "order_ack cloid=%s oid=%s",
+                cloid, oid
+            )
+        else:
+            # Important transitions (fills, cancels, rejects) - keep at INFO
+            self._log_event(
+                "order_state_transition",
+                cloid=cloid,
+                oid=oid,
+                from_state=from_state.name,
+                to_state=to_state.name,
+                reason=reason,
+                fill_qty=fill_qty,
+                filled_qty=record.filled_qty,
+                remaining_qty=record.remaining_qty,
+            )
         
         # Fire callback
         if self._on_state_change:

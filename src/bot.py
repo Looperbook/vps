@@ -223,6 +223,7 @@ class GridBot:
         self._session_realized_pnl: float = 0.0
         self._session_start_time: float = time.time()
         self._alltime_realized_pnl: float = 0.0  # Loaded from state, never reset
+        self._session_start_logged: bool = False  # Only log session_start once
         # C-1 FIX: Serialize fills during grid rebuild to prevent race condition
         # where fills use stale position snapshot
         self._rebuild_lock = asyncio.Lock()
@@ -871,13 +872,15 @@ class GridBot:
         gc = snapshot.grid_center
         if self.strategy and gc:
             self.strategy.grid_center = gc
-        self._log_event(
-            "session_start",
-            alltime_pnl=self._alltime_realized_pnl,
-            session_pnl=0.0,
-            session_start=self._session_start_time,
-            via="state_manager",
-        )
+        if not self._session_start_logged:
+            self._session_start_logged = True
+            self._log_event(
+                "session_start",
+                alltime_pnl=self._alltime_realized_pnl,
+                session_pnl=0.0,
+                session_start=self._session_start_time,
+                via="state_manager",
+            )
         """Fetch current position from exchange."""
         try:
             builder_asset = self.cfg.dex.lower() == "xyz" or self.coin.startswith("xyz:")

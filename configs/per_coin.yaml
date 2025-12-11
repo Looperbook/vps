@@ -8,17 +8,4 @@
 #   coalesce_ms       - Order coalescing window in milliseconds
 #   default_strategy  - Strategy type (default: grid)
 
-xyz:NVDA:
-  coalesce_ms: 30
-  default_strategy: grid
-  investment_usd: 750
-  base_spacing_pct: 0.005
-  grids: 24
-
-xyz:ORCL:
-  coalesce_ms: 30
-  default_strategy: grid
-  investment_usd: 750
-  base_spacing_pct: 0.0005
-  grids: 24
-
+# No overrides - using .env settings for all coins
