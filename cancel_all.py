@@ -53,3 +53,46 @@ for o in open_orders:
 
 for coin, count in sorted(coins.items()):
     print(f'  {coin}: {count} orders')
+
+# Ask for confirmation
+if len(open_orders) > 0:
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == '--yes':
+        confirm = 'yes'
+    else:
+        confirm = input("\nCancel ALL orders? Type 'yes' to confirm: ")
+    
+    if confirm.lower() == 'yes':
+        print("\nCancelling all orders...")
+        from hyperliquid.utils.signing import CancelRequest
+        
+        # Initialize exchange
+        exchange = Exchange(None, constants.MAINNET_API_URL, account_address=account_address)
+        exchange.account_address = account_address
+        # Use agent key for signing
+        exchange.wallet = None
+        import eth_account
+        exchange.wallet = eth_account.Account.from_key(private_key)
+        
+        # Build cancel requests
+        cancel_requests = []
+        for o in open_orders:
+            oid = o.get('oid')
+            coin = o.get('coin')
+            if oid and coin:
+                cancel_requests.append(CancelRequest(coin=coin, oid=int(oid)))
+        
+        # Cancel in batches
+        batch_size = 20
+        for i in range(0, len(cancel_requests), batch_size):
+            batch = cancel_requests[i:i+batch_size]
+            try:
+                result = exchange.bulk_cancel(batch)
+                print(f"Batch {i//batch_size + 1}: Cancelled {len(batch)} orders - {result}")
+            except Exception as e:
+                print(f"Batch {i//batch_size + 1}: Error - {e}")
+            time.sleep(0.5)  # Rate limit
+        
+        print("\n=== Done ===")
+    else:
+        print("Cancelled. No orders were modified.")
