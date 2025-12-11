@@ -66,32 +66,43 @@ if len(open_orders) > 0:
         print("\nCancelling all orders...")
         from hyperliquid.utils.signing import CancelRequest
         
-        # Initialize exchange
-        exchange = Exchange(None, constants.MAINNET_API_URL, account_address=account_address)
-        exchange.account_address = account_address
-        # Use agent key for signing
-        exchange.wallet = None
+        # Initialize exchange with vault_address for xyz DEX
         import eth_account
-        exchange.wallet = eth_account.Account.from_key(private_key)
+        wallet = eth_account.Account.from_key(private_key)
         
-        # Build cancel requests
-        cancel_requests = []
+        # For xyz DEX, we need to use the correct approach
+        # The coin names like 'xyz:NVDA' need to be sent as-is
+        exchange = Exchange(wallet, constants.MAINNET_API_URL, account_address=account_address)
+        
+        # Build cancel requests - group by coin
+        by_coin = {}
         for o in open_orders:
             oid = o.get('oid')
             coin = o.get('coin')
             if oid and coin:
-                cancel_requests.append(CancelRequest(coin=coin, oid=int(oid)))
+                if coin not in by_coin:
+                    by_coin[coin] = []
+                by_coin[coin].append(int(oid))
         
-        # Cancel in batches
-        batch_size = 20
-        for i in range(0, len(cancel_requests), batch_size):
-            batch = cancel_requests[i:i+batch_size]
-            try:
-                result = exchange.bulk_cancel(batch)
-                print(f"Batch {i//batch_size + 1}: Cancelled {len(batch)} orders - {result}")
-            except Exception as e:
-                print(f"Batch {i//batch_size + 1}: Error - {e}")
-            time.sleep(0.5)  # Rate limit
+        # Cancel each coin's orders
+        for coin, oids in by_coin.items():
+            print(f"\nCancelling {len(oids)} orders for {coin}...")
+            # Cancel in batches
+            batch_size = 20
+            for i in range(0, len(oids), batch_size):
+                batch_oids = oids[i:i+batch_size]
+                batch = [CancelRequest(coin=coin, oid=oid) for oid in batch_oids]
+                try:
+                    # Use builder for xyz DEX  
+                    if dex == 'xyz':
+                        # xyz coins need builder parameter
+                        result = exchange.bulk_cancel(batch, builder={"b": "0x0000000000000000000000000000000000000000", "f": 0})
+                    else:
+                        result = exchange.bulk_cancel(batch)
+                    print(f"  Batch {i//batch_size + 1}: Cancelled {len(batch)} orders - status: {result.get('status', 'ok')}")
+                except Exception as e:
+                    print(f"  Batch {i//batch_size + 1}: Error - {e}")
+                time.sleep(0.3)  # Rate limit
         
         print("\n=== Done ===")
     else:
